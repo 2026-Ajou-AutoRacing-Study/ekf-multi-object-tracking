@@ -22,7 +22,7 @@ configure:
   lidar_sync_scan_start: false  # false: Sync lidar time to scan end, true: Sync lidar time to scan start
 
   max_association_dist_m: 5.0 # Maximum association distance
-  prediction_model: 2  # 0: CV, 1: CTRV, 2: CA, 3: CTRA
+  prediction_model: 1  # Team default: CTRV (0: CV, 1: CTRV, 2: CA, 3: CTRA)
   system_noise_std_xy_m: 0.01
   system_noise_std_yaw_deg: 0.5
   system_noise_std_vx_vy_ms: 1.0
@@ -54,4 +54,3 @@ cg_to_main_lidar:
   transform_xyz_m: [-0.31, 0.0, 1.88]
   rotation_rpy_deg: [0.0, 0.0, 0.0]
   
-

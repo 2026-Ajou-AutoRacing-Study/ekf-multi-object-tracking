@@ -89,7 +89,7 @@ The behavior of the `ekf_multi_object_tracking` node can be customized using the
 - **max_association_dist_m**: Maximum distance for track association.
 - **prediction_model**: Selects the prediction model.
   - `0`: CV
-  - `1`: CTRV
+  - `1`: CTRV (default in the AjouNice2026 team fork)
   - `2`: CA
   - `3`: CTRA
 - **system_noise_std_xy_m, system_noise_std_yaw_deg, etc.**: System noise parameters.
