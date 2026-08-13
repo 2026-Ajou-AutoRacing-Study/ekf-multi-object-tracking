@@ -7,9 +7,9 @@ topic_name:
 configure:
   input_localization: 0  # 0: None, 1: nav_msgs/Odometry
   
-  global_coord_track: false # false: Tracker run in local coordinate, true: Tracker run in global coordinate
-  output_local_coord: true  # false: Output global coordinate, true: Output local coordinate
-  output_period_lidar: false  # false: Motion synced output, true: LiDAR synced output
+  global_coord_track: true # standardized detections are transformed to map before tracking
+  output_local_coord: false  # standardized output remains in map
+  output_period_lidar: true  # publish once per detector measurement
   output_confirmed_track: true  # false: output all track, true: output confirmed track
 
   use_predefined_ref_point: false  # false: use initial lat lon as ref, true: use defined ref

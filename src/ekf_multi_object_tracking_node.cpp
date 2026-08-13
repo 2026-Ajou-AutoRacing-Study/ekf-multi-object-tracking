@@ -13,6 +13,42 @@
 
 #include "ekf_multi_object_tracking_node.hpp"
 
+namespace {
+
+uint8_t ToAutowareClass(const int track_class) {
+    switch (track_class) {
+        case mc_mot::ObjectClass::CAR:
+            return autoware_perception_msgs::ObjectClassification::CAR;
+        case mc_mot::ObjectClass::TRUCK:
+            return autoware_perception_msgs::ObjectClassification::TRUCK;
+        case mc_mot::ObjectClass::PEDESTRIAN:
+            return autoware_perception_msgs::ObjectClassification::PEDESTRIAN;
+        case mc_mot::ObjectClass::BICYCLE:
+            return autoware_perception_msgs::ObjectClassification::BICYCLE;
+        default:
+            return autoware_perception_msgs::ObjectClassification::UNKNOWN;
+    }
+}
+
+unique_identifier_msgs::UUID StableTrackUuid(const int track_id) {
+    unique_identifier_msgs::UUID uuid;
+    std::fill(uuid.uuid.begin(), uuid.uuid.end(), 0U);
+    // Namespace the deterministic ID as "AJOU" and retain the tracker ID in
+    // the final four bytes.  This stays stable for the life of a track.
+    uuid.uuid[0] = 'A';
+    uuid.uuid[1] = 'J';
+    uuid.uuid[2] = 'O';
+    uuid.uuid[3] = 'U';
+    const uint32_t value = static_cast<uint32_t>(track_id);
+    uuid.uuid[12] = static_cast<uint8_t>((value >> 24) & 0xffU);
+    uuid.uuid[13] = static_cast<uint8_t>((value >> 16) & 0xffU);
+    uuid.uuid[14] = static_cast<uint8_t>((value >> 8) & 0xffU);
+    uuid.uuid[15] = static_cast<uint8_t>(value & 0xffU);
+    return uuid;
+}
+
+}  // namespace
+
 EkfMultiObjectTrackingNode::EkfMultiObjectTrackingNode(){
 
     // Data validation
@@ -34,6 +70,7 @@ void EkfMultiObjectTrackingNode::Init() {
     ROS_INFO_STREAM("Init");
     // Node initialization
     ros::NodeHandle nh;
+    ros::NodeHandle private_nh("~");
 
     ProcessYAML();
 
@@ -54,15 +91,21 @@ void EkfMultiObjectTrackingNode::Init() {
         cfg_output_track_marker_topic_ = "/output_track_marker";
     }
 
-    // Subscriber init
-    s_lidar_objects_ =
-            nh.subscribe(cfg_lidar_objects_topic_, 10, &EkfMultiObjectTrackingNode::CallbackBoundingBoxArray, this);
+    private_nh.param<std::string>("world_frame_id", world_frame_id_, "map");
+    private_nh.param<double>("transform_timeout_sec", transform_timeout_sec_, 0.1);
+
+    // Standard object pipeline I/O.  Global names are selected by launch remaps.
+    s_lidar_objects_ = private_nh.subscribe(
+        "input/objects", 10, &EkfMultiObjectTrackingNode::CallbackDetectedObjects, this);
 
     // Localization source subscriber
     if (config_.input_localization == mc_mot::LocalizationType::ODOMETRY)
         s_odometry_ = nh.subscribe(cfg_odometry_topic_, 10, &EkfMultiObjectTrackingNode::CallbackOdometry, this);
 
     // Publisher init
+    p_track_objects_ = private_nh.advertise<autoware_perception_msgs::TrackedObjects>(
+        "output/objects", 10);
+    // JSK and markers remain visualization-only compatibility outputs.
     p_all_track_ = nh.advertise<jsk_recognition_msgs::BoundingBoxArray>(cfg_output_track_jsk_topic_, 10);
     p_all_track_info_ = nh.advertise<visualization_msgs::MarkerArray>(cfg_output_track_marker_topic_, 10);
     p_ego_stl_ = nh.advertise<visualization_msgs::Marker>("app/perc/vis_ego_stl", 10);
@@ -75,22 +118,15 @@ void EkfMultiObjectTrackingNode::Init() {
 }
 
 void EkfMultiObjectTrackingNode::Run() {
-
-    double cur_ros_time = ros::Time::now().toSec();
-
     // ----- Input -----
     ros_interface::DetectObjects3D lidar_objects;
     {
         std::lock_guard<std::mutex> lock(mutex_lidar_objects_);
-        if (config_.output_period_lidar == true && b_is_new_lidar_objects_ == false) {
-            return;
-        }
+        // The standard pipeline is measurement-synchronized.  Predicting and
+        // publishing on the node wall-clock loop would manufacture duplicate
+        // frames and corrupt dt when rosbag time is used.
+        if (b_is_new_lidar_objects_ == false) return;
         lidar_objects = i_lidar_objects_;
-
-        if(config_.input_localization == mc_mot::LocalizationType::NONE){
-            // FIXME: Remove here when your detection data is synced with ros time
-            lidar_objects.header.stamp = cur_ros_time; 
-        }
     }
 
     
@@ -118,21 +154,15 @@ void EkfMultiObjectTrackingNode::Run() {
         }
     }
 
-    // Motion Update with fixed time (No Localization Input)
-    if (config_.input_localization == mc_mot::LocalizationType::NONE &&
-        b_is_track_init_ == true) {
-
-        double dt = cur_ros_time - last_predicted_time_;
-        mcot_algorithm_.RunPrediction(dt);
-        last_predicted_time_ = cur_ros_time;
-
-        b_is_new_track_objects_ = true;
-    }
-
     // Measurement Update
     if (b_is_new_lidar_objects_ == true) {
         if (config_.input_localization == mc_mot::LocalizationType::NONE && b_is_track_init_ == true) {
             double dt = lidar_objects.header.stamp - last_predicted_time_;
+            if (dt <= 0.0) {
+                ROS_WARN_THROTTLE(1.0, "[EKF tracker] Non-increasing detection stamp; dropping frame");
+                b_is_new_lidar_objects_ = false;
+                return;
+            }
             mcot_algorithm_.RunPrediction(dt);
             last_predicted_time_ = lidar_objects.header.stamp;
         }
@@ -183,13 +213,14 @@ void EkfMultiObjectTrackingNode::Run() {
                     GetSyncedLidarState(mot_track_structs.time_stamp, deque_lidar_state);
             ConvertTrackGlobalToLocal(mot_track_structs, synced_lidar_state);
 
-            o_frame_id = str_detection_frame_id_;
+            o_frame_id = world_frame_id_;
             VisualizeTrackObjects(mot_track_structs, o_frame_id);
         }
         else { // no localization. output velodyne coordinate
-            o_frame_id = str_detection_frame_id_;
+            o_frame_id = world_frame_id_;
             VisualizeTrackObjects(mot_track_structs, o_frame_id);
         }
+        BuildTrackedObjects(mot_track_structs, o_frame_id);
     }
 
 
@@ -200,6 +231,7 @@ void EkfMultiObjectTrackingNode::Publish() {
         std::cout<<"Publish Track Objects: " << o_jsk_tracked_objects_.boxes.size()<<std::endl;
         
         p_all_track_.publish(o_jsk_tracked_objects_);
+        p_track_objects_.publish(o_tracked_objects_);
         p_all_track_info_.publish(o_vis_track_info_);
         p_ego_stl_.publish(o_vis_ego_stl_);
 
@@ -356,6 +388,96 @@ void EkfMultiObjectTrackingNode::ConvertDetectObjectToMeastruct(const ros_interf
     meas.dimension.height = detect_object.dimension.height;
     meas.dimension.width = detect_object.dimension.width;
     meas.dimension.length = detect_object.dimension.length;
+}
+
+void EkfMultiObjectTrackingNode::BuildTrackedObjects(
+        const mc_mot::TrackStructs& track_structs, const std::string& frame_id) {
+    o_tracked_objects_.header.frame_id = frame_id;
+    o_tracked_objects_.header.stamp = ros::Time(track_structs.time_stamp);
+    o_tracked_objects_.objects.clear();
+
+    for (auto track : track_structs.track) {
+        if (!IsVisualizeTrack(track)) continue;
+
+        autoware_perception_msgs::TrackedObject output;
+        output.object_id = StableTrackUuid(track.track_id);
+        output.existence_probability = static_cast<float>(
+            std::max(0.0, std::min(1.0, track.detection_confidence)));
+
+        autoware_perception_msgs::ObjectClassification classification;
+        classification.label = ToAutowareClass(track.getRepClass());
+        classification.probability = static_cast<float>(
+            std::max(0.0, std::min(1.0, track.getRepClassProb())));
+        output.classification.push_back(classification);
+
+        auto& kinematics = output.kinematics;
+        auto& pose = kinematics.pose_with_covariance.pose;
+        pose.position.x = track.state_vec(S_X);
+        pose.position.y = track.state_vec(S_Y);
+        pose.position.z = track.object_z;
+        pose.orientation = tf::createQuaternionMsgFromYaw(track.state_vec(S_YAW));
+
+        auto& pose_cov = kinematics.pose_with_covariance.covariance;
+        std::fill(pose_cov.begin(), pose_cov.end(), 0.0);
+        pose_cov[0] = track.state_cov(S_X, S_X);
+        pose_cov[1] = track.state_cov(S_X, S_Y);
+        pose_cov[5] = track.state_cov(S_X, S_YAW);
+        pose_cov[6] = track.state_cov(S_Y, S_X);
+        pose_cov[7] = track.state_cov(S_Y, S_Y);
+        pose_cov[11] = track.state_cov(S_Y, S_YAW);
+        pose_cov[30] = track.state_cov(S_YAW, S_X);
+        pose_cov[31] = track.state_cov(S_YAW, S_Y);
+        pose_cov[35] = track.state_cov(S_YAW, S_YAW);
+
+        // Autoware object twist is expressed along/across the object heading,
+        // while the EKF state velocity is maintained in the map frame.
+        const double cosine = std::cos(track.state_vec(S_YAW));
+        const double sine = std::sin(track.state_vec(S_YAW));
+        auto& twist = kinematics.twist_with_covariance.twist;
+        twist.linear.x = cosine * track.state_vec(S_VX) + sine * track.state_vec(S_VY);
+        twist.linear.y = -sine * track.state_vec(S_VX) + cosine * track.state_vec(S_VY);
+        twist.angular.z = track.state_vec(S_YAW_RATE);
+
+        Eigen::Matrix2d velocity_covariance;
+        velocity_covariance <<
+            track.state_cov(S_VX, S_VX), track.state_cov(S_VX, S_VY),
+            track.state_cov(S_VY, S_VX), track.state_cov(S_VY, S_VY);
+        Eigen::Matrix2d world_to_body;
+        world_to_body << cosine, sine, -sine, cosine;
+        const Eigen::Matrix2d body_velocity_covariance =
+            world_to_body * velocity_covariance * world_to_body.transpose();
+        auto& twist_cov = kinematics.twist_with_covariance.covariance;
+        std::fill(twist_cov.begin(), twist_cov.end(), 0.0);
+        twist_cov[0] = body_velocity_covariance(0, 0);
+        twist_cov[1] = body_velocity_covariance(0, 1);
+        twist_cov[6] = body_velocity_covariance(1, 0);
+        twist_cov[7] = body_velocity_covariance(1, 1);
+        twist_cov[35] = track.state_cov(S_YAW_RATE, S_YAW_RATE);
+
+        auto& acceleration = kinematics.acceleration_with_covariance.accel;
+        acceleration.linear.x =
+            cosine * track.state_vec(S_AX) + sine * track.state_vec(S_AY);
+        acceleration.linear.y =
+            -sine * track.state_vec(S_AX) + cosine * track.state_vec(S_AY);
+        auto& acceleration_cov = kinematics.acceleration_with_covariance.covariance;
+        std::fill(acceleration_cov.begin(), acceleration_cov.end(), 0.0);
+        acceleration_cov[0] = track.state_cov(S_AX, S_AX);
+        acceleration_cov[7] = track.state_cov(S_AY, S_AY);
+
+        kinematics.orientation_availability =
+            classification.label == autoware_perception_msgs::ObjectClassification::CAR ||
+                    classification.label == autoware_perception_msgs::ObjectClassification::TRUCK
+                ? autoware_perception_msgs::TrackedObjectKinematics::AVAILABLE
+                : autoware_perception_msgs::TrackedObjectKinematics::SIGN_UNKNOWN;
+        kinematics.is_stationary =
+            std::hypot(track.state_vec(S_VX), track.state_vec(S_VY)) < 0.5;
+
+        output.shape.type = autoware_perception_msgs::Shape::BOUNDING_BOX;
+        output.shape.dimensions.x = track.dimension.length;
+        output.shape.dimensions.y = track.dimension.width;
+        output.shape.dimensions.z = track.dimension.height;
+        o_tracked_objects_.objects.push_back(output);
+    }
 }
 
 void EkfMultiObjectTrackingNode::VisualizeTrackObjects(const mc_mot::TrackStructs& track_structs,
@@ -889,8 +1011,7 @@ void EkfMultiObjectTrackingNode::MainLoop() {
         Publish();
         auto end_time = std::chrono::high_resolution_clock::now(); // 종료 시간 기록
         std::chrono::duration<double, std::milli> elapsed_time = end_time - start_time; // 경과 시간 계산
-        std::cout << "Execution time: " << std::fixed << std::setprecision(3) 
-                << elapsed_time.count() << " ms" << std::endl; // 소수점 3자리까지 출력
+        ROS_DEBUG_THROTTLE(1.0, "[EKF tracker] loop execution %.3f ms", elapsed_time.count());
 
         loop_rate.sleep();
     }

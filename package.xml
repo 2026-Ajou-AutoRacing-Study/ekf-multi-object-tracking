@@ -17,18 +17,17 @@
   <!-- The *depend tags are used to specify dependencies -->
   <!-- Dependencies can be catkin packages or system dependencies -->
   <buildtool_depend>catkin</buildtool_depend>
-  <build_depend>roscpp</build_depend>
-  <build_depend>tf</build_depend>
-  <build_depend>tf_conversions</build_depend>
-  <build_depend>jsk_recognition_msgs</build_depend>
-  <build_export_depend>roscpp</build_export_depend>
-  <build_export_depend>tf</build_export_depend>
-  <build_export_depend>tf_conversions</build_export_depend>
-  <build_export_depend>jsk_recognition_msgs</build_export_depend>
-  <exec_depend>roscpp</exec_depend>
-  <exec_depend>tf</exec_depend>
-  <exec_depend>tf_conversions</exec_depend>
-  <exec_depend>jsk_recognition_msgs</exec_depend>
+  <depend>autoware_perception_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>jsk_recognition_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>roscpp</depend>
+  <depend>tf</depend>
+  <depend>tf2_geometry_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf_conversions</depend>
+  <depend>unique_identifier_msgs</depend>
+  <depend>visualization_msgs</depend>
 
   <!-- The export tag contains other, unspecified, tags -->
   <export>

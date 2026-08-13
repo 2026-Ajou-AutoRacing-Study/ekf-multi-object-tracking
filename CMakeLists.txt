@@ -8,6 +8,7 @@ add_compile_options(-std=c++14)
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
+  autoware_perception_msgs
   roscpp
   rosbag
   tf
@@ -15,6 +16,9 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   sensor_msgs
   geometry_msgs
+  tf2_geometry_msgs
+  tf2_ros
+  unique_identifier_msgs
   eigen_conversions
   
   jsk_recognition_msgs
@@ -34,10 +38,16 @@ find_package(Boost REQUIRED COMPONENTS system)
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES trajectory
-#  CATKIN_DEPENDS roscpp rospy std_msgs
-#  DEPENDS system_lib
+  CATKIN_DEPENDS
+    autoware_perception_msgs
+    geometry_msgs
+    jsk_recognition_msgs
+    roscpp
+    tf
+    tf2_geometry_msgs
+    tf2_ros
+    unique_identifier_msgs
+    visualization_msgs
 )
 
 ###########

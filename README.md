@@ -27,14 +27,19 @@ These features make the package versatile and adaptable to a wide range of multi
 ### Input
 | Description                              | Type                      |
 |------------------------------------------|---------------------------|
-| Detection info                           | `jsk_recognition_msgs::BoundingBoxArray` |
+| Detection info (`~input/objects`)         | `autoware_perception_msgs::DetectedObjects` |
 | Localization info (optional)             | `nav_msgs::Odometry` (optional)          |
 
 ### Output
 | Description                              | Type                                |
 |------------------------------------------|-------------------------------------|
-| Track Bounding Box                       | `jsk_recognition_msgs::BoundingBoxArray` |
-| Track Info                               | `visualization_msgs::MarkerArray`   |
+| Tracked objects (`~output/objects`)       | `autoware_perception_msgs::TrackedObjects` |
+| Debug bounding boxes                     | `jsk_recognition_msgs::BoundingBoxArray` |
+| Debug markers                            | `visualization_msgs::MarkerArray`   |
+
+The detection pose is transformed from `header.frame_id` into `map` at the
+measurement timestamp before it enters the EKF.  Standard tracked output stays
+in `map`; JSK boxes and markers are visualization-only compatibility outputs.
 
 ## How to use
 ### 1. Install ROS messages and other libraries
@@ -57,14 +62,25 @@ source devel/setup.bash
 roslaunch ekf_multi_object_tracking ekf_multi_class_object_tracking.launch 
 ```
 
+The default launch contract is:
+
+```text
+/perception/object_recognition/detection/objects
+  -> /perception/object_recognition/tracking/objects
+```
+
+Both names can be changed with `input_objects:=...` and `output_objects:=...`.
+
 
 ## Configuration
 
 The behavior of the `ekf_multi_object_tracking` node can be customized using the `config/config.yaml` file. Below is a description of the key configuration parameters:
 
 ### Topic Names
-<!-- - **vehicle_state**: Topic for vehicle state data. Default: `/app/loc/vehicle_state` -->
-- **lidar_objects**: Topic for LiDAR object data. Topic type is **jsk_recognition_msgs::BoundingBoxArray**. Default: `/hmi/perc/jsk_pillar_objects`
+
+Standard data topics are private node interfaces and are selected by launch
+remaps. The `topic_name/output_track_jsk` and
+`topic_name/output_track_marker` YAML entries affect debug output only.
 
 ### Configuration Options
 - **input_localization**: Selects the input localization source.

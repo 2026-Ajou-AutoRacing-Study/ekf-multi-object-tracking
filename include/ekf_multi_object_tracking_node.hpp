@@ -32,6 +32,12 @@
 
 
 #include <geometry_msgs/Point.h>
+#include <autoware_perception_msgs/DetectedObject.h>
+#include <autoware_perception_msgs/DetectedObjects.h>
+#include <autoware_perception_msgs/ObjectClassification.h>
+#include <autoware_perception_msgs/TrackedObject.h>
+#include <autoware_perception_msgs/TrackedObjectKinematics.h>
+#include <autoware_perception_msgs/TrackedObjects.h>
 #include <jsk_recognition_msgs/BoundingBox.h>
 #include <jsk_recognition_msgs/BoundingBoxArray.h>
 #include <nav_msgs/Odometry.h>
@@ -51,6 +57,8 @@
 
 #include <geometry_msgs/TransformStamped.h>
 #include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
 // Algorithm
 #include "algorithm/ekf_multi_object_tracking.hpp"
@@ -178,6 +186,7 @@ private:
                                         mc_mot::Meastruct& meas);
 
     void VisualizeTrackObjects(const mc_mot::TrackStructs& track_structs, std::string frame_id);
+    void BuildTrackedObjects(const mc_mot::TrackStructs& track_structs, const std::string& frame_id);
     void ConvertTrackGlobalToLocal(mc_mot::TrackStructs& track_structs, mc_mot::ObjectState synced_lidar_state);
     bool IsVisualizeTrack(const mc_mot::TrackStruct& track);
 
@@ -192,45 +201,91 @@ private:
 
 private:
 
-    inline void CallbackBoundingBoxArray(const jsk_recognition_msgs::BoundingBoxArray::ConstPtr& msg) {
+    inline void CallbackDetectedObjects(const autoware_perception_msgs::DetectedObjects::ConstPtr& msg) {
+        if (msg->header.frame_id.empty()) {
+            ROS_WARN_THROTTLE(1.0, "[EKF tracker] Dropping detection with empty frame_id");
+            return;
+        }
+
         std::lock_guard<std::mutex> lock(mutex_lidar_objects_);
-        // i_lidar_objects_.header = msg->header;
-        i_lidar_objects_.header.frame_id = msg->header.frame_id;
-        str_detection_frame_id_ = msg->header.frame_id;
+        i_lidar_objects_.header.frame_id = world_frame_id_;
+        str_detection_frame_id_ = world_frame_id_;
         i_lidar_objects_.header.seq = msg->header.seq;
         i_lidar_objects_.header.stamp = ros_bridge::GetTimeStamp( msg->header.stamp);
         i_lidar_objects_.object.clear();
 
         unsigned int id = 0;
-        for (const auto& bbox : msg->boxes) {
+        for (const auto& object : msg->objects) {
+            geometry_msgs::PoseStamped source_pose;
+            source_pose.header = msg->header;
+            source_pose.pose = object.kinematics.pose_with_covariance.pose;
+            geometry_msgs::PoseStamped world_pose;
+            try {
+                if (msg->header.frame_id == world_frame_id_) {
+                    world_pose = source_pose;
+                } else {
+                    world_pose = tf_buffer_.transform(
+                        source_pose, world_frame_id_, ros::Duration(transform_timeout_sec_));
+                }
+            } catch (const tf2::TransformException& exception) {
+                ROS_WARN_THROTTLE(
+                    1.0, "[EKF tracker] Cannot transform %s to %s at %.6f: %s",
+                    msg->header.frame_id.c_str(), world_frame_id_.c_str(),
+                    msg->header.stamp.toSec(), exception.what());
+                i_lidar_objects_.object.clear();
+                return;
+            }
+
             ros_interface::DetectObject3D detect_object;
             detect_object.id = id++;
             detect_object.state.header.stamp = i_lidar_objects_.header.stamp;
-            detect_object.state.x = bbox.pose.position.x;
-            detect_object.state.y = bbox.pose.position.y;
-            detect_object.state.z = bbox.pose.position.z;
+            detect_object.state.x = world_pose.pose.position.x;
+            detect_object.state.y = world_pose.pose.position.y;
+            detect_object.state.z = world_pose.pose.position.z;
 
             tf::Quaternion quat;
-            tf::quaternionMsgToTF(bbox.pose.orientation, quat);
+            tf::quaternionMsgToTF(world_pose.pose.orientation, quat);
             double roll, pitch, yaw;
             tf::Matrix3x3(quat).getRPY(roll, pitch, yaw);
             detect_object.state.yaw = yaw;
             
-            detect_object.dimension.length = bbox.dimensions.x;
-            detect_object.dimension.width = bbox.dimensions.y;
-            detect_object.dimension.height = bbox.dimensions.z;
+            detect_object.dimension.length = object.shape.dimensions.x;
+            detect_object.dimension.width = object.shape.dimensions.y;
+            detect_object.dimension.height = object.shape.dimensions.z;
 
-            // FIXME: Use bbox label as class.
-            int i_class = bbox.label;
-            if(i_class > 4) i_class = 0;
-            detect_object.classification = static_cast<ros_interface::ObjectClass>(i_class);
-            detect_object.confidence_score = 0.9; // FIXME: Fill with acture detection confidence score
-            // if confidence score is lower than 0.5, algorithm 10x measurement noise
+            detect_object.classification = ros_interface::ObjectClass::UNKNOWN;
+            float best_class_probability = -1.0F;
+            for (const auto& classification : object.classification) {
+                if (classification.probability < best_class_probability) continue;
+                best_class_probability = classification.probability;
+                switch (classification.label) {
+                    case autoware_perception_msgs::ObjectClassification::CAR:
+                        detect_object.classification = ros_interface::ObjectClass::CAR;
+                        break;
+                    case autoware_perception_msgs::ObjectClassification::TRUCK:
+                    case autoware_perception_msgs::ObjectClassification::BUS:
+                    case autoware_perception_msgs::ObjectClassification::TRAILER:
+                        detect_object.classification = ros_interface::ObjectClass::TRUCK;
+                        break;
+                    case autoware_perception_msgs::ObjectClassification::PEDESTRIAN:
+                        detect_object.classification = ros_interface::ObjectClass::PEDESTRIAN;
+                        break;
+                    case autoware_perception_msgs::ObjectClassification::BICYCLE:
+                    case autoware_perception_msgs::ObjectClassification::MOTORCYCLE:
+                        detect_object.classification = ros_interface::ObjectClass::BICYCLE;
+                        break;
+                    default:
+                        detect_object.classification = ros_interface::ObjectClass::UNKNOWN;
+                        break;
+                }
+            }
+            detect_object.confidence_score = object.existence_probability;
 
             i_lidar_objects_.object.push_back(detect_object);
         }
 
-        std::cout<<"Callback BoundingBoxArray: " << i_lidar_objects_.object.size() << " objects" << std::endl;
+        ROS_DEBUG_STREAM("[EKF tracker] Received " << i_lidar_objects_.object.size()
+                         << " standardized detections");
         b_is_new_lidar_objects_ = true;
     }
 
@@ -328,6 +383,7 @@ private:
     std::string str_detection_frame_id_ = "";
 
     jsk_recognition_msgs::BoundingBoxArray o_jsk_tracked_objects_;
+    autoware_perception_msgs::TrackedObjects o_tracked_objects_;
     visualization_msgs::MarkerArray o_vis_track_info_;
     visualization_msgs::Marker o_vis_ego_stl_;
 
@@ -360,6 +416,11 @@ private:
     std::string cfg_odometry_topic_ = "";
     std::string cfg_output_track_jsk_topic_ = "";
     std::string cfg_output_track_marker_topic_ = "";
+    std::string world_frame_id_{"map"};
+    double transform_timeout_sec_{0.1};
+
+    tf2_ros::Buffer tf_buffer_;
+    tf2_ros::TransformListener tf_listener_{tf_buffer_};
 
     // Algorithm
 
