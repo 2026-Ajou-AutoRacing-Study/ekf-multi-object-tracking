@@ -27,6 +27,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <ros/ros.h>
 
 #define MAX_TRACKS 500
 #define MAX_HISTORY 7

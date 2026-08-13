@@ -228,7 +228,8 @@ void EkfMultiObjectTrackingNode::Run() {
 
 void EkfMultiObjectTrackingNode::Publish() {
     if (b_is_new_track_objects_ == true) {
-        std::cout<<"Publish Track Objects: " << o_jsk_tracked_objects_.boxes.size()<<std::endl;
+        ROS_DEBUG_STREAM("[EKF tracker] Publish " << o_tracked_objects_.objects.size()
+                         << " standardized tracks");
         
         p_all_track_.publish(o_jsk_tracked_objects_);
         p_track_objects_.publish(o_tracked_objects_);
@@ -249,7 +250,7 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
     nh.getParam("configure/input_localization", i_input_localization);
     config_.input_localization =  mc_mot::LocalizationType(i_input_localization);
 
-    std::cout<<"i_input_localization: " << i_input_localization <<std::endl;
+    ROS_DEBUG_STREAM("[EKF tracker] input_localization=" << i_input_localization);
     
     nh.getParam("configure/global_coord_track", config_.global_coord_track);
     nh.getParam("configure/output_local_coord", config_.output_local_coord);

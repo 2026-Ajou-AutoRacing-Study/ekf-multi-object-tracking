@@ -31,7 +31,7 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
 
     int i_meas_num = measurements.meas.size();
     if(i_meas_num > MAX_TRACKS){
-        std::cout<<"[RunUpdate] Too Many Measurement: "<< i_meas_num << std::endl;
+        ROS_WARN_STREAM("[EKF tracker] Too many measurements: " << i_meas_num);
         i_meas_num = MAX_TRACKS;
     }
     Eigen::MatrixXd cost_matrix(i_meas_num, MAX_TRACKS);
@@ -128,17 +128,15 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
     }
 
     // FIXME:  ======= For debugging =============
-    int asso_track_num = 0;
     int init_track_num = 0;
     int confirmed_track_num = 0;
     for (const auto &track : all_tracks_) {
-        if (track.is_associated) asso_track_num++;
         if (track.is_init) init_track_num++;
         if (track.is_confirmed) confirmed_track_num++;
     }
-    std::cout << "[RunUpdate] Det: " << i_meas_num << " Asso: "<< asso_count << " New: " << init_count << " Deleted: " << i_deleted_num << std::endl;
-    std::cout << "[RunUpdate] Asso: " << asso_track_num << " Inited: " << init_track_num << " Confirmed: " << confirmed_track_num
-              << std::endl;
+    ROS_DEBUG_STREAM("[EKF tracker] det=" << i_meas_num << " associated=" << asso_count
+                     << " new=" << init_count << " deleted=" << i_deleted_num
+                     << " active=" << init_track_num << " confirmed=" << confirmed_track_num);
 
     // ======= For debugging =============
 }
