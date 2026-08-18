@@ -34,6 +34,14 @@ configure:
   dimension_filter_alpha: 0.3  # 0.0: High filtering ~ 1.0: Use Current size
   use_kinematic_model: false  # Align velocity direction to heading.
   use_yaw_rate_filtering: true  # Restrict Yawrate based on velocity
+  # Resolve the pi ambiguity of moving vehicle boxes at the standardized
+  # TrackedObjects boundary. The EKF world velocity is preserved; only the
+  # equivalent body heading/signed longitudinal velocity representation is
+  # canonicalized. Low-speed tracks retain their previous decision.
+  canonicalize_vehicle_orientation_to_motion: true
+  orientation_canonicalization_min_speed_mps: 1.0
+  orientation_flip_enter_error_deg: 100.0
+  orientation_flip_exit_error_deg: 80.0
   max_steer_deg: 30.0
 
   visualize_mesh: false

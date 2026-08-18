@@ -279,6 +279,18 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
     nh.getParam("configure/dimension_filter_alpha", config_.dimension_filter_alpha);
     nh.getParam("configure/use_kinematic_model", config_.use_kinematic_model);
     nh.getParam("configure/use_yaw_rate_filtering", config_.use_yaw_rate_filtering);
+    nh.getParam(
+        "configure/canonicalize_vehicle_orientation_to_motion",
+        config_.canonicalize_vehicle_orientation_to_motion);
+    nh.getParam(
+        "configure/orientation_canonicalization_min_speed_mps",
+        config_.orientation_canonicalization_min_speed_mps);
+    nh.getParam(
+        "configure/orientation_flip_enter_error_deg",
+        config_.orientation_flip_enter_error_deg);
+    nh.getParam(
+        "configure/orientation_flip_exit_error_deg",
+        config_.orientation_flip_exit_error_deg);
     nh.getParam("configure/max_steer_deg", config_.max_steer_deg);
     nh.getParam("configure/visualize_mesh", config_.visualize_mesh);
 
@@ -397,7 +409,10 @@ void EkfMultiObjectTrackingNode::BuildTrackedObjects(
     o_tracked_objects_.header.stamp = ros::Time(track_structs.time_stamp);
     o_tracked_objects_.objects.clear();
 
+    std::unordered_set<int> active_track_ids;
+    int canonicalized_vehicle_count = 0;
     for (auto track : track_structs.track) {
+        active_track_ids.insert(track.track_id);
         if (!IsVisualizeTrack(track)) continue;
 
         autoware_perception_msgs::TrackedObject output;
@@ -411,12 +426,30 @@ void EkfMultiObjectTrackingNode::BuildTrackedObjects(
             std::max(0.0, std::min(1.0, track.getRepClassProb())));
         output.classification.push_back(classification);
 
+        const bool is_vehicle =
+            classification.label == autoware_perception_msgs::ObjectClassification::CAR ||
+            classification.label == autoware_perception_msgs::ObjectClassification::TRUCK ||
+            classification.label == autoware_perception_msgs::ObjectClassification::BUS ||
+            classification.label == autoware_perception_msgs::ObjectClassification::TRAILER;
+        const auto canonical = vehicle_orientation_canonicalizer_.Apply(
+            track.track_id,
+            track.state_vec(S_YAW),
+            track.state_vec(S_VX),
+            track.state_vec(S_VY),
+            is_vehicle,
+            config_.canonicalize_vehicle_orientation_to_motion,
+            config_.orientation_canonicalization_min_speed_mps,
+            config_.orientation_flip_enter_error_deg * M_PI / 180.0,
+            config_.orientation_flip_exit_error_deg * M_PI / 180.0);
+        if (canonical.flipped) ++canonicalized_vehicle_count;
+        const double output_yaw = canonical.yaw;
+
         auto& kinematics = output.kinematics;
         auto& pose = kinematics.pose_with_covariance.pose;
         pose.position.x = track.state_vec(S_X);
         pose.position.y = track.state_vec(S_Y);
         pose.position.z = track.object_z;
-        pose.orientation = tf::createQuaternionMsgFromYaw(track.state_vec(S_YAW));
+        pose.orientation = tf::createQuaternionMsgFromYaw(output_yaw);
 
         auto& pose_cov = kinematics.pose_with_covariance.covariance;
         std::fill(pose_cov.begin(), pose_cov.end(), 0.0);
@@ -432,8 +465,8 @@ void EkfMultiObjectTrackingNode::BuildTrackedObjects(
 
         // Autoware object twist is expressed along/across the object heading,
         // while the EKF state velocity is maintained in the map frame.
-        const double cosine = std::cos(track.state_vec(S_YAW));
-        const double sine = std::sin(track.state_vec(S_YAW));
+        const double cosine = std::cos(output_yaw);
+        const double sine = std::sin(output_yaw);
         auto& twist = kinematics.twist_with_covariance.twist;
         twist.linear.x = cosine * track.state_vec(S_VX) + sine * track.state_vec(S_VY);
         twist.linear.y = -sine * track.state_vec(S_VX) + cosine * track.state_vec(S_VY);
@@ -479,6 +512,11 @@ void EkfMultiObjectTrackingNode::BuildTrackedObjects(
         output.shape.dimensions.z = track.dimension.height;
         o_tracked_objects_.objects.push_back(output);
     }
+    vehicle_orientation_canonicalizer_.RetainOnly(active_track_ids);
+    ROS_DEBUG_STREAM_THROTTLE(
+        1.0,
+        "[EKF tracker] Canonicalized " << canonicalized_vehicle_count
+        << " moving vehicle orientations in this frame");
 }
 
 void EkfMultiObjectTrackingNode::VisualizeTrackObjects(const mc_mot::TrackStructs& track_structs,

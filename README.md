@@ -112,6 +112,14 @@ remaps. The `topic_name/output_track_jsk` and
 - **meas_noise_std_xy_m, meas_noise_std_yaw_deg**: Measurement noise parameters.
 - **dimension_filter_alpha**: Filtering parameter for object dimensions.
 - **use_kinematic_model**: Aligns velocity direction to heading if set to `true`.
+- **canonicalize_vehicle_orientation_to_motion**: Resolves the equivalent
+  `(yaw, speed)` versus `(yaw + pi, -speed)` representation for moving
+  CAR/TRUCK tracks at the standardized `TrackedObjects` output boundary.
+- **orientation_canonicalization_min_speed_mps**: Below this speed the last
+  orientation decision is retained instead of trusting a noisy velocity yaw.
+- **orientation_flip_enter_error_deg / orientation_flip_exit_error_deg**:
+  Hysteresis thresholds around the 90-degree motion-direction boundary. The
+  production defaults are 100/80 degrees.
 - **use_yaw_rate_filtering**: Restricts yaw rate based on velocity.
 - **max_steer_deg**: Maximum steering angle.
 - **visualize_mesh**: Enables mesh visualization if set to `true`.

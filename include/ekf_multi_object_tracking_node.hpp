@@ -23,6 +23,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 // #include <Eigen/Dense>
@@ -62,6 +63,7 @@
 
 // Algorithm
 #include "algorithm/ekf_multi_object_tracking.hpp"
+#include "vehicle_orientation_canonicalizer.hpp"
 
 
 namespace ros_bridge {
@@ -425,6 +427,7 @@ private:
     // Algorithm
 
     EkfMultiObjectTracking mcot_algorithm_;
+    vehicle_orientation::Canonicalizer vehicle_orientation_canonicalizer_;
     bool b_is_init_{false};
 };
 

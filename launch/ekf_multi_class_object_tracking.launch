@@ -5,8 +5,20 @@
        default="/perception/object_recognition/tracking/objects"/>
   <arg name="world_frame_id" default="map"/>
   <arg name="use_sim_time" default="false"/>
+  <arg name="canonicalize_vehicle_orientation_to_motion" default="true"/>
+  <arg name="orientation_canonicalization_min_speed_mps" default="1.0"/>
+  <arg name="orientation_flip_enter_error_deg" default="100.0"/>
+  <arg name="orientation_flip_exit_error_deg" default="80.0"/>
 
-  <rosparam file="$(find ekf_multi_object_tracking)/config/config.yaml" command="load"/>   
+  <rosparam file="$(find ekf_multi_object_tracking)/config/config.yaml" command="load"/>
+  <param name="configure/canonicalize_vehicle_orientation_to_motion"
+         value="$(arg canonicalize_vehicle_orientation_to_motion)"/>
+  <param name="configure/orientation_canonicalization_min_speed_mps"
+         value="$(arg orientation_canonicalization_min_speed_mps)"/>
+  <param name="configure/orientation_flip_enter_error_deg"
+         value="$(arg orientation_flip_enter_error_deg)"/>
+  <param name="configure/orientation_flip_exit_error_deg"
+         value="$(arg orientation_flip_exit_error_deg)"/>
   <param name="use_sim_time" value="$(arg use_sim_time)" />
   <node pkg="ekf_multi_object_tracking"
         type="ekf_multi_object_tracking"

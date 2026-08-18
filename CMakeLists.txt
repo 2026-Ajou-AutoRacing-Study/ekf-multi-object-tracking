@@ -75,3 +75,13 @@ add_dependencies(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME}
     ${catkin_LIBRARIES}
 )
+
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(
+    test_vehicle_orientation_canonicalizer
+    test/test_vehicle_orientation_canonicalizer.cpp
+  )
+  if(TARGET test_vehicle_orientation_canonicalizer)
+    target_link_libraries(test_vehicle_orientation_canonicalizer ${catkin_LIBRARIES})
+  endif()
+endif()

@@ -262,6 +262,11 @@ struct MultiClassObjectTrackingConfig {
     bool use_kinematic_model{false};
     bool use_yaw_rate_filtering{false};
 
+    bool canonicalize_vehicle_orientation_to_motion{true};
+    double orientation_canonicalization_min_speed_mps{1.0};
+    double orientation_flip_enter_error_deg{100.0};
+    double orientation_flip_exit_error_deg{80.0};
+
     double max_steer_deg{30.0};
 
     bool visualize_mesh{false};
