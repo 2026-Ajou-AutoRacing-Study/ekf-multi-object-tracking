@@ -267,6 +267,9 @@ struct MultiClassObjectTrackingConfig {
     double orientation_flip_enter_error_deg{100.0};
     double orientation_flip_exit_error_deg{80.0};
 
+    bool compensate_output_to_current_time{false};
+    double maximum_output_compensation_sec{0.25};
+
     double max_steer_deg{30.0};
 
     bool visualize_mesh{false};
@@ -285,6 +288,7 @@ public:
     void RunPrediction(double dt_sec);
     void RunUpdate(const mc_mot::Meastructs &measurements);
     mc_mot::TrackStructs GetTrackResults() const;
+    mc_mot::TrackStructs GetPredictedTrackResults(double target_timestamp);
 
     void UpdateConfig(const MultiClassObjectTrackingConfig config);
 

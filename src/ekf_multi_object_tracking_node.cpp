@@ -201,6 +201,17 @@ void EkfMultiObjectTrackingNode::Run() {
     if (b_is_new_track_objects_ == true) {
         // ----- Output -----
         mc_mot::TrackStructs mot_track_structs = mcot_algorithm_.GetTrackResults();
+        const double current_ros_time = ros::Time::now().toSec();
+        const double output_age_sec =
+            current_ros_time - mot_track_structs.time_stamp;
+        if (config_.compensate_output_to_current_time &&
+            output_age_sec > 0.0 &&
+            output_age_sec <= config_.maximum_output_compensation_sec) {
+            // Extrapolate an output copy only. The measurement-time EKF state
+            // remains untouched, preserving the true dt for the next update.
+            mot_track_structs = mcot_algorithm_.GetPredictedTrackResults(
+                current_ros_time);
+        }
 
         std::string o_frame_id;
         if (config_.input_localization != mc_mot::LocalizationType::NONE) {
@@ -291,6 +302,12 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
     nh.getParam(
         "configure/orientation_flip_exit_error_deg",
         config_.orientation_flip_exit_error_deg);
+    nh.getParam(
+        "configure/compensate_output_to_current_time",
+        config_.compensate_output_to_current_time);
+    nh.getParam(
+        "configure/maximum_output_compensation_sec",
+        config_.maximum_output_compensation_sec);
     nh.getParam("configure/max_steer_deg", config_.max_steer_deg);
     nh.getParam("configure/visualize_mesh", config_.visualize_mesh);
 

@@ -165,6 +165,18 @@ mc_mot::TrackStructs EkfMultiObjectTracking::GetTrackResults() const{
     return o_track_results;
 }
 
+mc_mot::TrackStructs EkfMultiObjectTracking::GetPredictedTrackResults(
+        const double target_timestamp) {
+    mc_mot::TrackStructs results = GetTrackResults();
+    const double dt = target_timestamp - results.time_stamp;
+    if (dt <= 0.0) return results;
+    for (auto& track : results.track) {
+        if (track.is_init) PredictTrack(track, dt);
+    }
+    results.time_stamp = target_timestamp;
+    return results;
+}
+
 void EkfMultiObjectTracking::UpdateConfig(const MultiClassObjectTrackingConfig config) {
     std::cout << "Update Config !" << std::endl;
     config_ = config;

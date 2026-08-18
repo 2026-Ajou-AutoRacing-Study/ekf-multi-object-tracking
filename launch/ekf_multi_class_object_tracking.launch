@@ -9,6 +9,8 @@
   <arg name="orientation_canonicalization_min_speed_mps" default="1.0"/>
   <arg name="orientation_flip_enter_error_deg" default="100.0"/>
   <arg name="orientation_flip_exit_error_deg" default="80.0"/>
+  <arg name="compensate_output_to_current_time" default="false"/>
+  <arg name="maximum_output_compensation_sec" default="0.25"/>
 
   <rosparam file="$(find ekf_multi_object_tracking)/config/config.yaml" command="load"/>
   <param name="configure/canonicalize_vehicle_orientation_to_motion"
@@ -19,6 +21,10 @@
          value="$(arg orientation_flip_enter_error_deg)"/>
   <param name="configure/orientation_flip_exit_error_deg"
          value="$(arg orientation_flip_exit_error_deg)"/>
+  <param name="configure/compensate_output_to_current_time"
+         value="$(arg compensate_output_to_current_time)"/>
+  <param name="configure/maximum_output_compensation_sec"
+         value="$(arg maximum_output_compensation_sec)"/>
   <param name="use_sim_time" value="$(arg use_sim_time)" />
   <node pkg="ekf_multi_object_tracking"
         type="ekf_multi_object_tracking"

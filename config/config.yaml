@@ -42,6 +42,14 @@ configure:
   orientation_canonicalization_min_speed_mps: 1.0
   orientation_flip_enter_error_deg: 100.0
   orientation_flip_exit_error_deg: 80.0
+  # Publish a non-mutating prediction of the measurement-time EKF state at
+  # current ROS time. This covers rolling-scan age plus detector latency while
+  # preserving the true measurement dt inside the filter.
+  # Experimental only. Offline A/B on the MORAI bags showed that projecting
+  # the state through detector/queue latency slightly worsened long-horizon
+  # prediction, so production keeps the honest measurement-time state.
+  compensate_output_to_current_time: false
+  maximum_output_compensation_sec: 0.25
   max_steer_deg: 30.0
 
   visualize_mesh: false
