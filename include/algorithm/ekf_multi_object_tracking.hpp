@@ -270,6 +270,12 @@ struct MultiClassObjectTrackingConfig {
     bool compensate_output_to_current_time{false};
     double maximum_output_compensation_sec{0.25};
 
+    // 0.0 keeps detector-synchronized publication. A positive value enables
+    // the node-internal scheduler, which publishes a non-mutating prediction
+    // of the EKF state at fixed ROS-time intervals.
+    double fixed_output_rate_hz{0.0};
+    double maximum_fixed_output_prediction_age_sec{0.25};
+
     double max_steer_deg{30.0};
 
     bool visualize_mesh{false};

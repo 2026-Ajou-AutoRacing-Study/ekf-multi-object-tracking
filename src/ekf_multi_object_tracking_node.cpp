@@ -120,14 +120,17 @@ void EkfMultiObjectTrackingNode::Init() {
 void EkfMultiObjectTrackingNode::Run() {
     // ----- Input -----
     ros_interface::DetectObjects3D lidar_objects;
+    bool has_new_lidar_objects = false;
     {
         std::lock_guard<std::mutex> lock(mutex_lidar_objects_);
-        // The standard pipeline is measurement-synchronized.  Predicting and
-        // publishing on the node wall-clock loop would manufacture duplicate
-        // frames and corrupt dt when rosbag time is used.
-        if (b_is_new_lidar_objects_ == false) return;
-        lidar_objects = i_lidar_objects_;
+        has_new_lidar_objects = b_is_new_lidar_objects_;
+        if (has_new_lidar_objects) lidar_objects = i_lidar_objects_;
     }
+
+    // Detector-synchronized mode has no work until the next measurement.
+    // Fixed-rate mode must continue so its internal output scheduler can
+    // publish predicted copies between measurements.
+    if (!has_new_lidar_objects && config_.fixed_output_rate_hz <= 0.0) return;
 
     
     std::deque<mc_mot::ObjectState> deque_lidar_state;
@@ -137,7 +140,8 @@ void EkfMultiObjectTrackingNode::Run() {
 
         mc_mot::ObjectState lidar_state = deque_lidar_state_.back();
 
-        if(lidar_objects.header.stamp - lidar_state.time_stamp > 1.0){
+        if(has_new_lidar_objects &&
+           lidar_objects.header.stamp - lidar_state.time_stamp > 1.0){
             ROS_WARN_STREAM("LiDAR STATE is Old!");
             deque_lidar_state_.clear();
         }
@@ -155,7 +159,7 @@ void EkfMultiObjectTrackingNode::Run() {
     }
 
     // Measurement Update
-    if (b_is_new_lidar_objects_ == true) {
+    if (has_new_lidar_objects) {
         if (config_.input_localization == mc_mot::LocalizationType::NONE && b_is_track_init_ == true) {
             double dt = lidar_objects.header.stamp - last_predicted_time_;
             if (dt <= 0.0) {
@@ -198,19 +202,64 @@ void EkfMultiObjectTrackingNode::Run() {
     }
 
     
-    if (b_is_new_track_objects_ == true) {
+    bool build_output = b_is_new_track_objects_;
+    double fixed_output_target_sec = 0.0;
+    if (config_.fixed_output_rate_hz > 0.0) {
+        // A measurement update does not publish immediately in fixed-rate
+        // mode. Only the internal scheduler below owns output cadence.
+        b_is_new_track_objects_ = false;
+        build_output = false;
+
+        if (b_is_track_init_) {
+            const double now_sec = ros::Time::now().toSec();
+            const double period_sec = 1.0 / config_.fixed_output_rate_hz;
+            if (next_fixed_output_time_sec_ <= 0.0 ||
+                now_sec + period_sec < next_fixed_output_time_sec_) {
+                next_fixed_output_time_sec_ = now_sec;
+            }
+            if (now_sec + 1.0e-9 >= next_fixed_output_time_sec_) {
+                fixed_output_target_sec = next_fixed_output_time_sec_;
+                // Skip missed slots instead of emitting a burst of duplicate
+                // messages after a slow callback or a rosbag clock jump.
+                const double periods_behind =
+                    std::floor((now_sec - next_fixed_output_time_sec_) / period_sec);
+                next_fixed_output_time_sec_ +=
+                    (std::max(0.0, periods_behind) + 1.0) * period_sec;
+                build_output = true;
+            }
+        }
+    }
+
+    if (build_output) {
         // ----- Output -----
         mc_mot::TrackStructs mot_track_structs = mcot_algorithm_.GetTrackResults();
-        const double current_ros_time = ros::Time::now().toSec();
-        const double output_age_sec =
-            current_ros_time - mot_track_structs.time_stamp;
-        if (config_.compensate_output_to_current_time &&
-            output_age_sec > 0.0 &&
-            output_age_sec <= config_.maximum_output_compensation_sec) {
+        if (config_.fixed_output_rate_hz > 0.0) {
+            const double output_age_sec =
+                fixed_output_target_sec - mot_track_structs.time_stamp;
+            if (output_age_sec < -1.0e-6 ||
+                output_age_sec > config_.maximum_fixed_output_prediction_age_sec) {
+                ROS_DEBUG_THROTTLE(
+                    1.0,
+                    "[EKF tracker] Skip fixed output with state age %.3f sec",
+                    output_age_sec);
+                return;
+            }
+            if (output_age_sec > 0.0) {
+                mot_track_structs = mcot_algorithm_.GetPredictedTrackResults(
+                    fixed_output_target_sec);
+            }
+        } else {
+            const double current_ros_time = ros::Time::now().toSec();
+            const double output_age_sec =
+                current_ros_time - mot_track_structs.time_stamp;
+            if (config_.compensate_output_to_current_time &&
+                output_age_sec > 0.0 &&
+                output_age_sec <= config_.maximum_output_compensation_sec) {
             // Extrapolate an output copy only. The measurement-time EKF state
             // remains untouched, preserving the true dt for the next update.
-            mot_track_structs = mcot_algorithm_.GetPredictedTrackResults(
-                current_ros_time);
+                mot_track_structs = mcot_algorithm_.GetPredictedTrackResults(
+                    current_ros_time);
+            }
         }
 
         std::string o_frame_id;
@@ -232,6 +281,7 @@ void EkfMultiObjectTrackingNode::Run() {
             VisualizeTrackObjects(mot_track_structs, o_frame_id);
         }
         BuildTrackedObjects(mot_track_structs, o_frame_id);
+        b_is_new_track_objects_ = true;
     }
 
 
@@ -308,6 +358,12 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
     nh.getParam(
         "configure/maximum_output_compensation_sec",
         config_.maximum_output_compensation_sec);
+    nh.getParam(
+        "configure/fixed_output_rate_hz",
+        config_.fixed_output_rate_hz);
+    nh.getParam(
+        "configure/maximum_fixed_output_prediction_age_sec",
+        config_.maximum_fixed_output_prediction_age_sec);
     nh.getParam("configure/max_steer_deg", config_.max_steer_deg);
     nh.getParam("configure/visualize_mesh", config_.visualize_mesh);
 

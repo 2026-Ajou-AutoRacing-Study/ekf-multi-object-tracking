@@ -50,6 +50,11 @@ configure:
   # prediction, so production keeps the honest measurement-time state.
   compensate_output_to_current_time: false
   maximum_output_compensation_sec: 0.25
+  # 0.0: publish on each detector measurement. Positive values enable the
+  # EKF node's own ROS-time scheduler and publish predicted state copies at
+  # the requested rate without mutating the measurement-time filter state.
+  fixed_output_rate_hz: 0.0
+  maximum_fixed_output_prediction_age_sec: 0.25
   max_steer_deg: 30.0
 
   visualize_mesh: false

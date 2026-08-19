@@ -16,6 +16,7 @@
 #pragma once
 
 // STD header
+#include <algorithm>
 #include <unistd.h>
 #include <Eigen/Core>
 #include <chrono>
@@ -404,6 +405,7 @@ private:
     mc_mot::ObjectState last_lidar_state_;
 
     double last_predicted_time_;
+    double next_fixed_output_time_sec_{0.0};
 
     std::deque<mc_mot::ObjectState> deque_lidar_state_;
 
