@@ -344,6 +344,27 @@ void EkfMultiObjectTracking::UpdateTrack(mc_mot::TrackStruct &track, const mc_mo
     Eigen::Matrix8_8d I = Eigen::Matrix8_8d::Identity();
     track.state_cov = (I - K * H_) * track.state_cov;
 
+    if (measurement.has_velocity && config_.detection_velocity_fusion_mode >= 2) {
+        Eigen::Matrix<double, 2, 8> velocity_h =
+            Eigen::Matrix<double, 2, 8>::Zero();
+        velocity_h(0, S_VX) = 1.0;
+        velocity_h(1, S_VY) = 1.0;
+        Eigen::Vector2d velocity_measurement(
+            measurement.state.v_x, measurement.state.v_y);
+        const double variance =
+            config_.detection_velocity_noise_std_mps *
+            config_.detection_velocity_noise_std_mps;
+        Eigen::Matrix2d velocity_r = variance * Eigen::Matrix2d::Identity();
+        Eigen::Matrix2d velocity_s =
+            velocity_h * track.state_cov * velocity_h.transpose() + velocity_r;
+        Eigen::Matrix<double, 8, 2> velocity_k =
+            track.state_cov * velocity_h.transpose() * velocity_s.inverse();
+        track.state_vec += velocity_k *
+            (velocity_measurement - velocity_h * track.state_vec);
+        track.state_cov =
+            (I - velocity_k * velocity_h) * track.state_cov;
+    }
+
     // Update track attributes
     track.is_associated = true;
     track.updateDetectionCount(true);
@@ -400,6 +421,17 @@ void EkfMultiObjectTracking::InitTrack(mc_mot::TrackStruct &track, const mc_mot:
     track.state_vec(S_X) = measurement.state.x;
     track.state_vec(S_Y) = measurement.state.y;
     track.state_vec(S_YAW) = measurement.state.yaw;
+    if (measurement.has_velocity && config_.detection_velocity_fusion_mode >= 1) {
+        track.state_vec(S_VX) = measurement.state.v_x;
+        track.state_vec(S_VY) = measurement.state.v_y;
+        const double variance =
+            config_.detection_velocity_noise_std_mps *
+            config_.detection_velocity_noise_std_mps;
+        track.state_cov(S_VX, S_VX) = variance;
+        track.state_cov(S_VY, S_VY) = variance;
+        track.state_cov(S_VX, S_VY) = 0.0;
+        track.state_cov(S_VY, S_VX) = 0.0;
+    }
 
     Eigen::Matrix3d S = H_ * track.state_cov * H_.transpose() + R_;
     Eigen::Matrix8_3d K = track.state_cov * H_.transpose() * S.inverse();

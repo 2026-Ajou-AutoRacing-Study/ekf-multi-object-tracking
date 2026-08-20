@@ -216,6 +216,7 @@ struct TrackStructs {
 struct Meastruct {
     unsigned int id{0};
     float detection_confidence{1.0};
+    bool has_velocity{false};
 
     ObjectClass classification;
     ObjectDimension dimension;
@@ -256,6 +257,10 @@ struct MultiClassObjectTrackingConfig {
 
     double meas_noise_std_xy_m{0.1};
     double meas_noise_std_yaw_deg{0.1};
+    // 0: ignore detector velocity, 1: initialize new tracks only,
+    // 2: initialize and update velocity whenever a valid measurement exists.
+    int detection_velocity_fusion_mode{0};
+    double detection_velocity_noise_std_mps{1.0};
 
     double dimension_filter_alpha{0.1};
 

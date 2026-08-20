@@ -337,6 +337,14 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
     nh.getParam("configure/system_noise_std_ax_ay_ms2", config_.system_noise_std_ax_ay_ms2);
     nh.getParam("configure/meas_noise_std_xy_m", config_.meas_noise_std_xy_m);
     nh.getParam("configure/meas_noise_std_yaw_deg", config_.meas_noise_std_yaw_deg);
+    nh.param<int>(
+        "configure/detection_velocity_fusion_mode",
+        config_.detection_velocity_fusion_mode,
+        0);
+    nh.param<double>(
+        "configure/detection_velocity_noise_std_mps",
+        config_.detection_velocity_noise_std_mps,
+        1.0);
     nh.getParam("configure/dimension_filter_alpha", config_.dimension_filter_alpha);
     nh.getParam("configure/use_kinematic_model", config_.use_kinematic_model);
     nh.getParam("configure/use_yaw_rate_filtering", config_.use_yaw_rate_filtering);
@@ -464,12 +472,15 @@ void EkfMultiObjectTrackingNode::ConvertDetectObjectToMeastruct(const ros_interf
     meas.id = detect_object.id;
     meas.detection_confidence = detect_object.confidence_score;
     meas.classification = mc_mot::ObjectClass(detect_object.classification);
+    meas.has_velocity = detect_object.has_velocity;
 
     meas.state.time_stamp = detect_object.state.header.stamp;
     meas.state.x = detect_object.state.x;
     meas.state.y = detect_object.state.y;
     meas.state.z = detect_object.state.z;
     meas.state.yaw = detect_object.state.yaw;
+    meas.state.v_x = detect_object.state.v_x;
+    meas.state.v_y = detect_object.state.v_y;
 
     meas.dimension.height = detect_object.dimension.height;
     meas.dimension.width = detect_object.dimension.width;

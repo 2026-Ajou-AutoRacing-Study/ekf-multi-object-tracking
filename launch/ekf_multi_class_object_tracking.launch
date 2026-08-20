@@ -13,6 +13,8 @@
   <arg name="maximum_output_compensation_sec" default="0.25"/>
   <arg name="fixed_output_rate_hz" default="0.0"/>
   <arg name="maximum_fixed_output_prediction_age_sec" default="0.25"/>
+  <arg name="detection_velocity_fusion_mode" default="0"/>
+  <arg name="detection_velocity_noise_std_mps" default="1.0"/>
 
   <rosparam file="$(find ekf_multi_object_tracking)/config/config.yaml" command="load"/>
   <param name="configure/canonicalize_vehicle_orientation_to_motion"
@@ -31,6 +33,10 @@
          value="$(arg fixed_output_rate_hz)"/>
   <param name="configure/maximum_fixed_output_prediction_age_sec"
          value="$(arg maximum_fixed_output_prediction_age_sec)"/>
+  <param name="configure/detection_velocity_fusion_mode"
+         value="$(arg detection_velocity_fusion_mode)"/>
+  <param name="configure/detection_velocity_noise_std_mps"
+         value="$(arg detection_velocity_noise_std_mps)"/>
   <param name="use_sim_time" value="$(arg use_sim_time)" />
   <node pkg="ekf_multi_object_tracking"
         type="ekf_multi_object_tracking"

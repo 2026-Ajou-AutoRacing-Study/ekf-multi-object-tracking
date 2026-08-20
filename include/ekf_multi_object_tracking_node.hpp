@@ -133,6 +133,7 @@ namespace ros_interface {
         uint32_t    id;
         float       confidence_score;
         ObjectClass classification;
+        bool has_velocity{false};
 
         ObjectDimension dimension;        
         Object3DState   state;
@@ -283,6 +284,26 @@ private:
                 }
             }
             detect_object.confidence_score = object.existence_probability;
+
+            // This stack's standardized convention expresses DetectedObject
+            // twist in the object/body frame. Convert it to the map frame
+            // before handing it to the EKF state [VX, VY]. Detectors without
+            // a velocity head keep has_twist=false and preserve the historical
+            // position-only behavior.
+            detect_object.has_velocity = object.kinematics.has_twist;
+            if (detect_object.has_velocity) {
+                const auto& twist = object.kinematics.twist_with_covariance.twist;
+                if (std::isfinite(twist.linear.x) && std::isfinite(twist.linear.y)) {
+                    const double cosine = std::cos(yaw);
+                    const double sine = std::sin(yaw);
+                    detect_object.state.v_x =
+                        cosine * twist.linear.x - sine * twist.linear.y;
+                    detect_object.state.v_y =
+                        sine * twist.linear.x + cosine * twist.linear.y;
+                } else {
+                    detect_object.has_velocity = false;
+                }
+            }
 
             i_lidar_objects_.object.push_back(detect_object);
         }

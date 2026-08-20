@@ -84,4 +84,12 @@ if(CATKIN_ENABLE_TESTING)
   if(TARGET test_vehicle_orientation_canonicalizer)
     target_link_libraries(test_vehicle_orientation_canonicalizer ${catkin_LIBRARIES})
   endif()
+  catkin_add_gtest(
+    test_detection_velocity_fusion
+    test/test_detection_velocity_fusion.cpp
+    src/algorithm/ekf_multi_object_tracking.cpp
+  )
+  if(TARGET test_detection_velocity_fusion)
+    target_link_libraries(test_detection_velocity_fusion ${catkin_LIBRARIES})
+  endif()
 endif()
