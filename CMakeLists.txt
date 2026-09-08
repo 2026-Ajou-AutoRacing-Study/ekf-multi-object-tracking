@@ -76,6 +76,14 @@ target_link_libraries(${PROJECT_NAME}
     ${catkin_LIBRARIES}
 )
 
+install(TARGETS ${PROJECT_NAME}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(DIRECTORY config launch
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
 if(CATKIN_ENABLE_TESTING)
   catkin_add_gtest(
     test_vehicle_orientation_canonicalizer
