@@ -15,6 +15,12 @@
   <arg name="maximum_fixed_output_prediction_age_sec" default="0.25"/>
   <arg name="detection_velocity_fusion_mode" default="0"/>
   <arg name="detection_velocity_noise_std_mps" default="1.0"/>
+  <!-- Position-only tracker tuning knobs. Defaults preserve production. -->
+  <arg name="prediction_model" default="1"/>
+  <arg name="system_noise_std_vx_vy_ms" default="1.0"/>
+  <arg name="meas_noise_std_xy_m" default="0.3"/>
+  <arg name="meas_noise_std_yaw_deg" default="10.0"/>
+  <arg name="use_kinematic_model" default="false"/>
 
   <rosparam file="$(find ekf_multi_object_tracking)/config/config.yaml" command="load"/>
   <param name="configure/canonicalize_vehicle_orientation_to_motion"
@@ -37,6 +43,15 @@
          value="$(arg detection_velocity_fusion_mode)"/>
   <param name="configure/detection_velocity_noise_std_mps"
          value="$(arg detection_velocity_noise_std_mps)"/>
+  <param name="configure/prediction_model" value="$(arg prediction_model)"/>
+  <param name="configure/system_noise_std_vx_vy_ms"
+         value="$(arg system_noise_std_vx_vy_ms)"/>
+  <param name="configure/meas_noise_std_xy_m"
+         value="$(arg meas_noise_std_xy_m)"/>
+  <param name="configure/meas_noise_std_yaw_deg"
+         value="$(arg meas_noise_std_yaw_deg)"/>
+  <param name="configure/use_kinematic_model"
+         value="$(arg use_kinematic_model)"/>
   <param name="use_sim_time" value="$(arg use_sim_time)" />
   <node pkg="ekf_multi_object_tracking"
         type="ekf_multi_object_tracking"
