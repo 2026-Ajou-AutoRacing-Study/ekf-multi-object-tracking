@@ -28,7 +28,9 @@ configure:
   system_noise_std_vx_vy_ms: 1.0
   system_noise_std_yaw_rate_degs: 1.0
   system_noise_std_ax_ay_ms2: 0.6
-  meas_noise_std_xy_m: 0.3
+  # MORAI online three-bag A/B: 0.40 m reduced speed/AVE and Map-CV FDE
+  # with a small center-error trade-off versus the historical 0.30 m.
+  meas_noise_std_xy_m: 0.4
   meas_noise_std_yaw_deg: 10.00
   # Optional detector velocity measurement. Production detectors currently
   # publish has_twist=false, so mode 0 preserves the position-only tracker.

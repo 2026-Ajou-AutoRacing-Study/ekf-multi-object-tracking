@@ -18,7 +18,7 @@
   <!-- Position-only tracker tuning knobs. Defaults preserve production. -->
   <arg name="prediction_model" default="1"/>
   <arg name="system_noise_std_vx_vy_ms" default="1.0"/>
-  <arg name="meas_noise_std_xy_m" default="0.3"/>
+  <arg name="meas_noise_std_xy_m" default="0.4"/>
   <arg name="meas_noise_std_yaw_deg" default="10.0"/>
   <arg name="use_kinematic_model" default="false"/>
 
