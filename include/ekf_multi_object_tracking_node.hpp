@@ -179,6 +179,8 @@ public:
     void MainLoop();
 
 private:
+    // First timestamp of uninterrupted motion above the moving threshold, by track ID.
+    std::unordered_map<int, double> moving_since_by_track_id_;
 
     // Data type conversion and Local-Global Transform
     // FIXME: Rewrite this functions for your custom detection data type

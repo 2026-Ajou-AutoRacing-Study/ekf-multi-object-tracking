@@ -587,8 +587,19 @@ void EkfMultiObjectTrackingNode::BuildTrackedObjects(
                     classification.label == autoware_perception_msgs::ObjectClassification::TRUCK
                 ? autoware_perception_msgs::TrackedObjectKinematics::AVAILABLE
                 : autoware_perception_msgs::TrackedObjectKinematics::SIGN_UNKNOWN;
-        kinematics.is_stationary =
-            std::hypot(track.state_vec(S_VX), track.state_vec(S_VY)) < 0.5;
+        constexpr double moving_speed_mps = 1.5;
+        constexpr double moving_duration_sec = 1.0;
+        const double speed_mps = std::hypot(track.state_vec(S_VX), track.state_vec(S_VY));
+        const double stamp_sec = track_structs.time_stamp;
+        if (!std::isfinite(speed_mps) || !std::isfinite(stamp_sec) ||
+            speed_mps < moving_speed_mps) {
+            moving_since_by_track_id_.erase(track.track_id);
+            kinematics.is_stationary = true;
+        } else {
+            auto it = moving_since_by_track_id_.emplace(track.track_id, stamp_sec).first;
+            if (stamp_sec < it->second) it->second = stamp_sec;
+            kinematics.is_stationary = stamp_sec - it->second < moving_duration_sec;
+        }
 
         output.shape.type = autoware_perception_msgs::Shape::BOUNDING_BOX;
         output.shape.dimensions.x = track.dimension.length;
@@ -597,6 +608,13 @@ void EkfMultiObjectTrackingNode::BuildTrackedObjects(
         o_tracked_objects_.objects.push_back(output);
     }
     vehicle_orientation_canonicalizer_.RetainOnly(active_track_ids);
+    for (auto it = moving_since_by_track_id_.begin(); it != moving_since_by_track_id_.end();) {
+        if (active_track_ids.count(it->first) == 0) {
+            it = moving_since_by_track_id_.erase(it);
+        } else {
+            ++it;
+        }
+    }
     ROS_DEBUG_STREAM_THROTTLE(
         1.0,
         "[EKF tracker] Canonicalized " << canonicalized_vehicle_count
