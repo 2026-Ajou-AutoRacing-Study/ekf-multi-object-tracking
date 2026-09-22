@@ -95,6 +95,12 @@ struct ObjectDimension {
     double height{0.0};
 };
 
+struct CenterObservation {
+    double time_stamp{0.0};
+    double x{0.0};
+    double y{0.0};
+};
+
 struct TrackStruct {
     int track_id{-1};
     double update_time{0.0};
@@ -107,6 +113,8 @@ struct TrackStruct {
     ObjectClass classification;
     ObjectDimension dimension;
     double object_z{0.0};
+    std::deque<CenterObservation> center_history;
+    double last_center_motion_fusion_time{0.0};
 
     bool is_init{false};
     bool is_confirmed{false};
@@ -205,6 +213,8 @@ struct TrackStruct {
         is_confirmed = false;
         is_associated = false;
         std::fill(std::begin(detection_arr), std::end(detection_arr), false);
+        center_history.clear();
+        last_center_motion_fusion_time = 0.0;
     }
 };
 
@@ -262,6 +272,18 @@ struct MultiClassObjectTrackingConfig {
     int detection_velocity_fusion_mode{0};
     double detection_velocity_noise_std_mps{1.0};
 
+    // Optional causal velocity observation derived from associated raw
+    // detection centers in the global frame.  Kept separate from detector
+    // velocity so a 7D detector can use it without changing its message.
+    bool center_motion_velocity_fusion{false};
+    double center_motion_min_baseline_sec{0.30};
+    double center_motion_medium_baseline_sec{0.65};
+    double center_motion_long_baseline_sec{0.90};
+    double center_motion_max_gap_sec{0.25};
+    double center_motion_min_update_interval_sec{0.20};
+    double center_motion_early_noise_std_mps{1.50};
+    double center_motion_mature_noise_std_mps{0.60};
+
     double dimension_filter_alpha{0.1};
 
     bool use_kinematic_model{false};
@@ -308,6 +330,14 @@ private:
     void PredictTrack(mc_mot::TrackStruct &track, double dt);
     void UpdateTrack(mc_mot::TrackStruct &track, const mc_mot::Meastruct &measurement);
     void InitTrack(mc_mot::TrackStruct &track, const mc_mot::Meastruct &measurement);
+    void UpdateCenterMotionVelocity(
+        mc_mot::TrackStruct &track,
+        const mc_mot::Meastruct &measurement);
+    void FuseVelocity(
+        mc_mot::TrackStruct &track,
+        double velocity_x,
+        double velocity_y,
+        double noise_std_mps);
 
     void MatchPairs(const Eigen::MatrixXd &cost_matrix, std::vector<int> &row_indices, std::vector<int> &col_indices);
     void UpdateTrackId();

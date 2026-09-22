@@ -345,25 +345,14 @@ void EkfMultiObjectTracking::UpdateTrack(mc_mot::TrackStruct &track, const mc_mo
     track.state_cov = (I - K * H_) * track.state_cov;
 
     if (measurement.has_velocity && config_.detection_velocity_fusion_mode >= 2) {
-        Eigen::Matrix<double, 2, 8> velocity_h =
-            Eigen::Matrix<double, 2, 8>::Zero();
-        velocity_h(0, S_VX) = 1.0;
-        velocity_h(1, S_VY) = 1.0;
-        Eigen::Vector2d velocity_measurement(
-            measurement.state.v_x, measurement.state.v_y);
-        const double variance =
-            config_.detection_velocity_noise_std_mps *
-            config_.detection_velocity_noise_std_mps;
-        Eigen::Matrix2d velocity_r = variance * Eigen::Matrix2d::Identity();
-        Eigen::Matrix2d velocity_s =
-            velocity_h * track.state_cov * velocity_h.transpose() + velocity_r;
-        Eigen::Matrix<double, 8, 2> velocity_k =
-            track.state_cov * velocity_h.transpose() * velocity_s.inverse();
-        track.state_vec += velocity_k *
-            (velocity_measurement - velocity_h * track.state_vec);
-        track.state_cov =
-            (I - velocity_k * velocity_h) * track.state_cov;
+        FuseVelocity(
+            track,
+            measurement.state.v_x,
+            measurement.state.v_y,
+            config_.detection_velocity_noise_std_mps);
     }
+
+    UpdateCenterMotionVelocity(track, measurement);
 
     // Update track attributes
     track.is_associated = true;
@@ -413,6 +402,116 @@ void EkfMultiObjectTracking::UpdateTrack(mc_mot::TrackStruct &track, const mc_mo
     }
 }
 
+void EkfMultiObjectTracking::FuseVelocity(
+        mc_mot::TrackStruct &track,
+        const double velocity_x,
+        const double velocity_y,
+        const double noise_std_mps) {
+        Eigen::Matrix<double, 2, 8> velocity_h =
+            Eigen::Matrix<double, 2, 8>::Zero();
+        velocity_h(0, S_VX) = 1.0;
+        velocity_h(1, S_VY) = 1.0;
+        Eigen::Vector2d velocity_measurement(velocity_x, velocity_y);
+        const double variance = noise_std_mps * noise_std_mps;
+        Eigen::Matrix2d velocity_r = variance * Eigen::Matrix2d::Identity();
+        Eigen::Matrix2d velocity_s =
+            velocity_h * track.state_cov * velocity_h.transpose() + velocity_r;
+        Eigen::Matrix<double, 8, 2> velocity_k =
+            track.state_cov * velocity_h.transpose() * velocity_s.inverse();
+        track.state_vec += velocity_k *
+            (velocity_measurement - velocity_h * track.state_vec);
+        Eigen::Matrix8_8d identity = Eigen::Matrix8_8d::Identity();
+        track.state_cov = (identity - velocity_k * velocity_h) * track.state_cov;
+}
+
+void EkfMultiObjectTracking::UpdateCenterMotionVelocity(
+        mc_mot::TrackStruct &track,
+        const mc_mot::Meastruct &measurement) {
+    if (!config_.center_motion_velocity_fusion || !config_.global_coord_track ||
+        (measurement.classification != mc_mot::ObjectClass::CAR &&
+         measurement.classification != mc_mot::ObjectClass::TRUCK)) {
+        return;
+    }
+
+    auto &history = track.center_history;
+    const mc_mot::CenterObservation current{
+        measurement.state.time_stamp, measurement.state.x, measurement.state.y};
+
+    if (!history.empty()) {
+        const double gap = current.time_stamp - history.back().time_stamp;
+        if (gap <= 0.0 || gap > config_.center_motion_max_gap_sec) {
+            history.clear();
+        }
+    }
+    history.push_back(current);
+
+    const double keep_sec = config_.center_motion_long_baseline_sec +
+                            config_.center_motion_max_gap_sec;
+    while (history.size() > 1 &&
+           current.time_stamp - history.front().time_stamp > keep_sec) {
+        history.pop_front();
+    }
+
+    if (history.size() < 2) return;
+    const double available_span = current.time_stamp - history.front().time_stamp;
+    if (available_span < config_.center_motion_min_baseline_sec) return;
+
+    double target_baseline = 0.45;
+    if (available_span >= config_.center_motion_long_baseline_sec) {
+        target_baseline = config_.center_motion_long_baseline_sec;
+    } else if (available_span >= config_.center_motion_medium_baseline_sec) {
+        target_baseline = config_.center_motion_medium_baseline_sec;
+    }
+
+    const mc_mot::CenterObservation *reference = nullptr;
+    double best_error = std::numeric_limits<double>::max();
+    for (const auto &candidate : history) {
+        const double baseline = current.time_stamp - candidate.time_stamp;
+        if (baseline < config_.center_motion_min_baseline_sec ||
+            baseline > config_.center_motion_long_baseline_sec + 1.0e-6) {
+            continue;
+        }
+        const double error = std::abs(baseline - target_baseline);
+        if (error < best_error) {
+            best_error = error;
+            reference = &candidate;
+        }
+    }
+    if (reference == nullptr) return;
+
+    if (track.last_center_motion_fusion_time > 0.0 &&
+        current.time_stamp - track.last_center_motion_fusion_time <
+            config_.center_motion_min_update_interval_sec) {
+        return;
+    }
+
+    const double baseline = current.time_stamp - reference->time_stamp;
+    const double velocity_x = (current.x - reference->x) / baseline;
+    const double velocity_y = (current.y - reference->y) / baseline;
+    const double speed = std::hypot(velocity_x, velocity_y);
+    if (!std::isfinite(speed) || speed > MAX_TRACK_VEL) {
+        history.clear();
+        history.push_back(current);
+        return;
+    }
+
+    const double maturity = std::max(
+        0.0,
+        std::min(
+            1.0,
+            (baseline - config_.center_motion_min_baseline_sec) /
+                std::max(
+                    1.0e-6,
+                    config_.center_motion_long_baseline_sec -
+                        config_.center_motion_min_baseline_sec)));
+    const double noise_std =
+        config_.center_motion_early_noise_std_mps + maturity *
+        (config_.center_motion_mature_noise_std_mps -
+         config_.center_motion_early_noise_std_mps);
+    FuseVelocity(track, velocity_x, velocity_y, noise_std);
+    track.last_center_motion_fusion_time = current.time_stamp;
+}
+
 void EkfMultiObjectTracking::InitTrack(mc_mot::TrackStruct &track, const mc_mot::Meastruct &measurement) {
     track.track_id = cur_track_id_;
     track.update_time = measurement.state.time_stamp;
@@ -447,6 +546,15 @@ void EkfMultiObjectTracking::InitTrack(mc_mot::TrackStruct &track, const mc_mot:
 
     track.is_init = true;
     track.is_associated = false; // TODO:
+
+    if (config_.center_motion_velocity_fusion && config_.global_coord_track &&
+        (measurement.classification == mc_mot::ObjectClass::CAR ||
+         measurement.classification == mc_mot::ObjectClass::TRUCK)) {
+        track.center_history.push_back(mc_mot::CenterObservation{
+            measurement.state.time_stamp,
+            measurement.state.x,
+            measurement.state.y});
+    }
 
     track.updateDetectionCount(true);
 }

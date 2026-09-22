@@ -100,6 +100,109 @@ TEST(DetectionVelocityFusion, EveryUpdateCorrectsVelocityState) {
   EXPECT_NEAR(fused_velocity, 5.0, 0.05);
 }
 
+TEST(CenterMotionVelocityFusion, WaitsForMinimumCausalBaseline) {
+  MultiClassObjectTrackingConfig off_config;
+  off_config.global_coord_track = true;
+  auto off_tracker = std::make_unique<EkfMultiObjectTracking>(off_config);
+
+  MultiClassObjectTrackingConfig q0_config = off_config;
+  q0_config.center_motion_velocity_fusion = true;
+  q0_config.center_motion_min_baseline_sec = 0.30;
+  auto q0_tracker = std::make_unique<EkfMultiObjectTracking>(q0_config);
+
+  const auto first = Measurement(1.0, 0.0, 0.0, false, 0.0, 0.0);
+  const auto second = Measurement(1.2, 2.0, 0.0, false, 0.0, 0.0);
+  Update(*off_tracker, first);
+  Update(*q0_tracker, first);
+  off_tracker->RunPrediction(0.2);
+  q0_tracker->RunPrediction(0.2);
+  Update(*off_tracker, second);
+  Update(*q0_tracker, second);
+
+  const auto off_tracks = off_tracker->GetTrackResults();
+  const auto q0_tracks = q0_tracker->GetTrackResults();
+  const auto& off_track = InitializedTrack(off_tracks);
+  const auto& q0_track = InitializedTrack(q0_tracks);
+  EXPECT_EQ(q0_track.center_history.size(), 2U);
+  EXPECT_DOUBLE_EQ(q0_track.state_vec(S_VX), off_track.state_vec(S_VX));
+  EXPECT_DOUBLE_EQ(
+      q0_track.state_cov(S_VX, S_VX), off_track.state_cov(S_VX, S_VX));
+}
+
+TEST(CenterMotionVelocityFusion, CorrectsVehicleVelocityAfterCausalBaseline) {
+  MultiClassObjectTrackingConfig off_config;
+  off_config.global_coord_track = true;
+  auto off_tracker = std::make_unique<EkfMultiObjectTracking>(off_config);
+
+  MultiClassObjectTrackingConfig q0_config = off_config;
+  q0_config.center_motion_velocity_fusion = true;
+  q0_config.center_motion_early_noise_std_mps = 0.5;
+  q0_config.center_motion_mature_noise_std_mps = 0.5;
+  auto q0_tracker = std::make_unique<EkfMultiObjectTracking>(q0_config);
+
+  for (int index = 0; index <= 6; ++index) {
+    const double timestamp = 1.0 + 0.1 * index;
+    const auto measurement = Measurement(
+        timestamp, 1.0 * index, 0.0, false, 0.0, 0.0);
+    if (index > 0) {
+      off_tracker->RunPrediction(0.1);
+      q0_tracker->RunPrediction(0.1);
+    }
+    Update(*off_tracker, measurement);
+    Update(*q0_tracker, measurement);
+  }
+
+  const double off_velocity =
+      InitializedTrack(off_tracker->GetTrackResults()).state_vec(S_VX);
+  const double q0_velocity =
+      InitializedTrack(q0_tracker->GetTrackResults()).state_vec(S_VX);
+  EXPECT_LT(std::abs(q0_velocity - 10.0), std::abs(off_velocity - 10.0));
+  EXPECT_NEAR(q0_velocity, 10.0, 0.5);
+}
+
+TEST(CenterMotionVelocityFusion, ResetsHistoryAcrossAssociationGap) {
+  MultiClassObjectTrackingConfig config;
+  config.global_coord_track = true;
+  config.center_motion_velocity_fusion = true;
+  config.center_motion_max_gap_sec = 0.25;
+  auto tracker = std::make_unique<EkfMultiObjectTracking>(config);
+
+  Update(*tracker, Measurement(1.0, 0.0, 0.0, false, 0.0, 0.0));
+  tracker->RunPrediction(0.4);
+  Update(*tracker, Measurement(1.4, 2.0, 0.0, false, 0.0, 0.0));
+
+  const auto tracks = tracker->GetTrackResults();
+  const auto& track = InitializedTrack(tracks);
+  ASSERT_EQ(track.center_history.size(), 1U);
+  EXPECT_DOUBLE_EQ(track.center_history.front().time_stamp, 1.4);
+}
+
+TEST(CenterMotionVelocityFusion, DoesNotOvercountOverlappingWindows) {
+  MultiClassObjectTrackingConfig config;
+  config.global_coord_track = true;
+  config.center_motion_velocity_fusion = true;
+  config.center_motion_min_baseline_sec = 0.30;
+  config.center_motion_min_update_interval_sec = 0.20;
+  auto tracker = std::make_unique<EkfMultiObjectTracking>(config);
+
+  for (int index = 0; index <= 4; ++index) {
+    if (index > 0) tracker->RunPrediction(0.1);
+    Update(
+        *tracker,
+        Measurement(
+            1.0 + 0.1 * index,
+            static_cast<double>(index),
+            0.0,
+            false,
+            0.0,
+            0.0));
+  }
+
+  const auto tracks = tracker->GetTrackResults();
+  const auto& track = InitializedTrack(tracks);
+  EXPECT_NEAR(track.last_center_motion_fusion_time, 1.3, 1.0e-12);
+}
+
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

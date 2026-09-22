@@ -345,6 +345,38 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
         "configure/detection_velocity_noise_std_mps",
         config_.detection_velocity_noise_std_mps,
         1.0);
+    nh.param<bool>(
+        "configure/center_motion_velocity_fusion",
+        config_.center_motion_velocity_fusion,
+        false);
+    nh.param<double>(
+        "configure/center_motion_min_baseline_sec",
+        config_.center_motion_min_baseline_sec,
+        0.30);
+    nh.param<double>(
+        "configure/center_motion_medium_baseline_sec",
+        config_.center_motion_medium_baseline_sec,
+        0.65);
+    nh.param<double>(
+        "configure/center_motion_long_baseline_sec",
+        config_.center_motion_long_baseline_sec,
+        0.90);
+    nh.param<double>(
+        "configure/center_motion_max_gap_sec",
+        config_.center_motion_max_gap_sec,
+        0.25);
+    nh.param<double>(
+        "configure/center_motion_min_update_interval_sec",
+        config_.center_motion_min_update_interval_sec,
+        0.20);
+    nh.param<double>(
+        "configure/center_motion_early_noise_std_mps",
+        config_.center_motion_early_noise_std_mps,
+        1.50);
+    nh.param<double>(
+        "configure/center_motion_mature_noise_std_mps",
+        config_.center_motion_mature_noise_std_mps,
+        0.60);
     nh.getParam("configure/dimension_filter_alpha", config_.dimension_filter_alpha);
     nh.getParam("configure/use_kinematic_model", config_.use_kinematic_model);
     nh.getParam("configure/use_yaw_rate_filtering", config_.use_yaw_rate_filtering);
