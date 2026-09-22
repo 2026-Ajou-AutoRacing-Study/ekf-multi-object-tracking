@@ -41,6 +41,9 @@ configure:
   # associated raw detection centers. Production remains false until the
   # tracking/Map-CV held-out gate is passed.
   center_motion_velocity_fusion: false
+  center_motion_fuse_ekf_state: true
+  center_motion_override_output_velocity: false
+  center_motion_maximum_output_age_sec: 0.40
   center_motion_min_baseline_sec: 0.30
   center_motion_medium_baseline_sec: 0.65
   center_motion_long_baseline_sec: 0.90
@@ -48,6 +51,7 @@ configure:
   # Overlapping displacement windows are strongly correlated; do not feed
   # them to the EKF as independent measurements every detector frame.
   center_motion_min_update_interval_sec: 0.20
+  center_motion_max_fit_residual_m: 0.10
   center_motion_early_noise_std_mps: 1.50
   center_motion_mature_noise_std_mps: 0.60
 

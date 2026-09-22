@@ -115,6 +115,10 @@ struct TrackStruct {
     double object_z{0.0};
     std::deque<CenterObservation> center_history;
     double last_center_motion_fusion_time{0.0};
+    bool has_center_motion_velocity{false};
+    double center_motion_velocity_x{0.0};
+    double center_motion_velocity_y{0.0};
+    double center_motion_velocity_noise_std_mps{0.0};
 
     bool is_init{false};
     bool is_confirmed{false};
@@ -215,6 +219,10 @@ struct TrackStruct {
         std::fill(std::begin(detection_arr), std::end(detection_arr), false);
         center_history.clear();
         last_center_motion_fusion_time = 0.0;
+        has_center_motion_velocity = false;
+        center_motion_velocity_x = 0.0;
+        center_motion_velocity_y = 0.0;
+        center_motion_velocity_noise_std_mps = 0.0;
     }
 };
 
@@ -276,11 +284,15 @@ struct MultiClassObjectTrackingConfig {
     // detection centers in the global frame.  Kept separate from detector
     // velocity so a 7D detector can use it without changing its message.
     bool center_motion_velocity_fusion{false};
+    bool center_motion_fuse_ekf_state{true};
+    bool center_motion_override_output_velocity{false};
+    double center_motion_maximum_output_age_sec{0.40};
     double center_motion_min_baseline_sec{0.30};
     double center_motion_medium_baseline_sec{0.65};
     double center_motion_long_baseline_sec{0.90};
     double center_motion_max_gap_sec{0.25};
     double center_motion_min_update_interval_sec{0.20};
+    double center_motion_max_fit_residual_m{0.10};
     double center_motion_early_noise_std_mps{1.50};
     double center_motion_mature_noise_std_mps{0.60};
 

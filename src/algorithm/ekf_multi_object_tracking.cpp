@@ -479,6 +479,54 @@ void EkfMultiObjectTracking::UpdateCenterMotionVelocity(
     }
     if (reference == nullptr) return;
 
+    std::vector<const mc_mot::CenterObservation *> fit_observations;
+    for (const auto &candidate : history) {
+        if (current.time_stamp - candidate.time_stamp <=
+            config_.center_motion_long_baseline_sec + 1.0e-6) {
+            fit_observations.push_back(&candidate);
+        }
+    }
+    if (fit_observations.size() < 3) return;
+
+    double mean_t = 0.0;
+    double mean_x = 0.0;
+    double mean_y = 0.0;
+    for (const auto *item : fit_observations) {
+        mean_t += item->time_stamp;
+        mean_x += item->x;
+        mean_y += item->y;
+    }
+    const double count = static_cast<double>(fit_observations.size());
+    mean_t /= count;
+    mean_x /= count;
+    mean_y /= count;
+
+    double time_variance = 0.0;
+    double time_x_covariance = 0.0;
+    double time_y_covariance = 0.0;
+    for (const auto *item : fit_observations) {
+        const double centered_t = item->time_stamp - mean_t;
+        time_variance += centered_t * centered_t;
+        time_x_covariance += centered_t * (item->x - mean_x);
+        time_y_covariance += centered_t * (item->y - mean_y);
+    }
+    if (time_variance <= 1.0e-9) return;
+    const double fit_vx = time_x_covariance / time_variance;
+    const double fit_vy = time_y_covariance / time_variance;
+    double squared_residual_sum = 0.0;
+    for (const auto *item : fit_observations) {
+        const double dt = item->time_stamp - mean_t;
+        const double residual_x = item->x - (mean_x + fit_vx * dt);
+        const double residual_y = item->y - (mean_y + fit_vy * dt);
+        squared_residual_sum +=
+            residual_x * residual_x + residual_y * residual_y;
+    }
+    const double fit_residual = std::sqrt(squared_residual_sum / count);
+    if (!std::isfinite(fit_residual) ||
+        fit_residual > config_.center_motion_max_fit_residual_m) {
+        return;
+    }
+
     if (track.last_center_motion_fusion_time > 0.0 &&
         current.time_stamp - track.last_center_motion_fusion_time <
             config_.center_motion_min_update_interval_sec) {
@@ -508,7 +556,13 @@ void EkfMultiObjectTracking::UpdateCenterMotionVelocity(
         config_.center_motion_early_noise_std_mps + maturity *
         (config_.center_motion_mature_noise_std_mps -
          config_.center_motion_early_noise_std_mps);
-    FuseVelocity(track, velocity_x, velocity_y, noise_std);
+    track.has_center_motion_velocity = true;
+    track.center_motion_velocity_x = velocity_x;
+    track.center_motion_velocity_y = velocity_y;
+    track.center_motion_velocity_noise_std_mps = noise_std;
+    if (config_.center_motion_fuse_ekf_state) {
+        FuseVelocity(track, velocity_x, velocity_y, noise_std);
+    }
     track.last_center_motion_fusion_time = current.time_stamp;
 }
 

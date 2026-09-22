@@ -349,6 +349,18 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
         "configure/center_motion_velocity_fusion",
         config_.center_motion_velocity_fusion,
         false);
+    nh.param<bool>(
+        "configure/center_motion_fuse_ekf_state",
+        config_.center_motion_fuse_ekf_state,
+        true);
+    nh.param<bool>(
+        "configure/center_motion_override_output_velocity",
+        config_.center_motion_override_output_velocity,
+        false);
+    nh.param<double>(
+        "configure/center_motion_maximum_output_age_sec",
+        config_.center_motion_maximum_output_age_sec,
+        0.40);
     nh.param<double>(
         "configure/center_motion_min_baseline_sec",
         config_.center_motion_min_baseline_sec,
@@ -369,6 +381,10 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
         "configure/center_motion_min_update_interval_sec",
         config_.center_motion_min_update_interval_sec,
         0.20);
+    nh.param<double>(
+        "configure/center_motion_max_fit_residual_m",
+        config_.center_motion_max_fit_residual_m,
+        0.10);
     nh.param<double>(
         "configure/center_motion_early_noise_std_mps",
         config_.center_motion_early_noise_std_mps,
@@ -547,11 +563,25 @@ void EkfMultiObjectTrackingNode::BuildTrackedObjects(
             classification.label == autoware_perception_msgs::ObjectClassification::TRUCK ||
             classification.label == autoware_perception_msgs::ObjectClassification::BUS ||
             classification.label == autoware_perception_msgs::ObjectClassification::TRAILER;
+        double output_velocity_x = track.state_vec(S_VX);
+        double output_velocity_y = track.state_vec(S_VY);
+        const double center_motion_age =
+            track_structs.time_stamp - track.last_center_motion_fusion_time;
+        const bool use_center_motion_output =
+            config_.center_motion_velocity_fusion &&
+            config_.center_motion_override_output_velocity &&
+            track.has_center_motion_velocity &&
+            center_motion_age >= -1.0e-6 &&
+            center_motion_age <= config_.center_motion_maximum_output_age_sec;
+        if (use_center_motion_output) {
+            output_velocity_x = track.center_motion_velocity_x;
+            output_velocity_y = track.center_motion_velocity_y;
+        }
         const auto canonical = vehicle_orientation_canonicalizer_.Apply(
             track.track_id,
             track.state_vec(S_YAW),
-            track.state_vec(S_VX),
-            track.state_vec(S_VY),
+            output_velocity_x,
+            output_velocity_y,
             is_vehicle,
             config_.canonicalize_vehicle_orientation_to_motion,
             config_.orientation_canonicalization_min_speed_mps,
@@ -584,14 +614,20 @@ void EkfMultiObjectTrackingNode::BuildTrackedObjects(
         const double cosine = std::cos(output_yaw);
         const double sine = std::sin(output_yaw);
         auto& twist = kinematics.twist_with_covariance.twist;
-        twist.linear.x = cosine * track.state_vec(S_VX) + sine * track.state_vec(S_VY);
-        twist.linear.y = -sine * track.state_vec(S_VX) + cosine * track.state_vec(S_VY);
+        twist.linear.x = cosine * output_velocity_x + sine * output_velocity_y;
+        twist.linear.y = -sine * output_velocity_x + cosine * output_velocity_y;
         twist.angular.z = track.state_vec(S_YAW_RATE);
 
         Eigen::Matrix2d velocity_covariance;
         velocity_covariance <<
             track.state_cov(S_VX, S_VX), track.state_cov(S_VX, S_VY),
             track.state_cov(S_VY, S_VX), track.state_cov(S_VY, S_VY);
+        if (use_center_motion_output) {
+            const double variance =
+                track.center_motion_velocity_noise_std_mps *
+                track.center_motion_velocity_noise_std_mps;
+            velocity_covariance = variance * Eigen::Matrix2d::Identity();
+        }
         Eigen::Matrix2d world_to_body;
         world_to_body << cosine, sine, -sine, cosine;
         const Eigen::Matrix2d body_velocity_covariance =
@@ -620,7 +656,7 @@ void EkfMultiObjectTrackingNode::BuildTrackedObjects(
                 ? autoware_perception_msgs::TrackedObjectKinematics::AVAILABLE
                 : autoware_perception_msgs::TrackedObjectKinematics::SIGN_UNKNOWN;
         kinematics.is_stationary =
-            std::hypot(track.state_vec(S_VX), track.state_vec(S_VY)) < 0.5;
+            std::hypot(output_velocity_x, output_velocity_y) < 0.5;
 
         output.shape.type = autoware_perception_msgs::Shape::BOUNDING_BOX;
         output.shape.dimensions.x = track.dimension.length;

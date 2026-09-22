@@ -203,6 +203,32 @@ TEST(CenterMotionVelocityFusion, DoesNotOvercountOverlappingWindows) {
   EXPECT_NEAR(track.last_center_motion_fusion_time, 1.3, 1.0e-12);
 }
 
+TEST(CenterMotionVelocityFusion, RejectsNonlinearCenterHistory) {
+  MultiClassObjectTrackingConfig config;
+  config.global_coord_track = true;
+  config.center_motion_velocity_fusion = true;
+  config.center_motion_max_fit_residual_m = 0.10;
+  auto tracker = std::make_unique<EkfMultiObjectTracking>(config);
+
+  const double positions[] = {0.0, 1.0, 2.0, 4.0};
+  for (int index = 0; index < 4; ++index) {
+    if (index > 0) tracker->RunPrediction(0.1);
+    Update(
+        *tracker,
+        Measurement(
+            1.0 + 0.1 * index,
+            positions[index],
+            0.0,
+            false,
+            0.0,
+            0.0));
+  }
+
+  const auto tracks = tracker->GetTrackResults();
+  const auto& track = InitializedTrack(tracks);
+  EXPECT_DOUBLE_EQ(track.last_center_motion_fusion_time, 0.0);
+}
+
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
