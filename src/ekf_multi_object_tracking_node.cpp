@@ -105,6 +105,12 @@ void EkfMultiObjectTrackingNode::Init() {
     // Publisher init
     p_track_objects_ = private_nh.advertise<autoware_perception_msgs::TrackedObjects>(
         "output/objects", 10);
+    p_center_motion_active_objects_ =
+        private_nh.advertise<autoware_perception_msgs::TrackedObjects>(
+            "diagnostics/center_motion_active_objects", 10);
+    p_center_motion_inactive_objects_ =
+        private_nh.advertise<autoware_perception_msgs::TrackedObjects>(
+            "diagnostics/center_motion_inactive_objects", 10);
     // JSK and markers remain visualization-only compatibility outputs.
     p_all_track_ = nh.advertise<jsk_recognition_msgs::BoundingBoxArray>(cfg_output_track_jsk_topic_, 10);
     p_all_track_info_ = nh.advertise<visualization_msgs::MarkerArray>(cfg_output_track_marker_topic_, 10);
@@ -294,6 +300,10 @@ void EkfMultiObjectTrackingNode::Publish() {
         
         p_all_track_.publish(o_jsk_tracked_objects_);
         p_track_objects_.publish(o_tracked_objects_);
+        if (publish_center_motion_diagnostics_) {
+            p_center_motion_active_objects_.publish(o_center_motion_active_objects_);
+            p_center_motion_inactive_objects_.publish(o_center_motion_inactive_objects_);
+        }
         p_all_track_info_.publish(o_vis_track_info_);
         p_ego_stl_.publish(o_vis_ego_stl_);
 
@@ -348,6 +358,10 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
     nh.param<bool>(
         "configure/center_motion_velocity_fusion",
         config_.center_motion_velocity_fusion,
+        false);
+    nh.param<bool>(
+        "configure/publish_center_motion_diagnostics",
+        publish_center_motion_diagnostics_,
         false);
     nh.param<bool>(
         "configure/center_motion_fuse_ekf_state",
@@ -540,6 +554,10 @@ void EkfMultiObjectTrackingNode::BuildTrackedObjects(
     o_tracked_objects_.header.frame_id = frame_id;
     o_tracked_objects_.header.stamp = ros::Time(track_structs.time_stamp);
     o_tracked_objects_.objects.clear();
+    o_center_motion_active_objects_.header = o_tracked_objects_.header;
+    o_center_motion_active_objects_.objects.clear();
+    o_center_motion_inactive_objects_.header = o_tracked_objects_.header;
+    o_center_motion_inactive_objects_.objects.clear();
 
     std::unordered_set<int> active_track_ids;
     int canonicalized_vehicle_count = 0;
@@ -567,12 +585,14 @@ void EkfMultiObjectTrackingNode::BuildTrackedObjects(
         double output_velocity_y = track.state_vec(S_VY);
         const double center_motion_age =
             track_structs.time_stamp - track.last_center_motion_fusion_time;
-        const bool use_center_motion_output =
+        const bool center_motion_available =
             config_.center_motion_velocity_fusion &&
-            config_.center_motion_override_output_velocity &&
             track.has_center_motion_velocity &&
             center_motion_age >= -1.0e-6 &&
             center_motion_age <= config_.center_motion_maximum_output_age_sec;
+        const bool use_center_motion_output =
+            config_.center_motion_override_output_velocity &&
+            center_motion_available;
         if (use_center_motion_output) {
             output_velocity_x = track.center_motion_velocity_x;
             output_velocity_y = track.center_motion_velocity_y;
@@ -663,6 +683,17 @@ void EkfMultiObjectTrackingNode::BuildTrackedObjects(
         output.shape.dimensions.y = track.dimension.width;
         output.shape.dimensions.z = track.dimension.height;
         o_tracked_objects_.objects.push_back(output);
+        if (publish_center_motion_diagnostics_) {
+            // The diagnostic split describes where the causal estimator
+            // passed its quality gate. This remains meaningful when output
+            // override is disabled, enabling a paired baseline on the exact
+            // same accepted samples.
+            if (center_motion_available) {
+                o_center_motion_active_objects_.objects.push_back(output);
+            } else {
+                o_center_motion_inactive_objects_.objects.push_back(output);
+            }
+        }
     }
     vehicle_orientation_canonicalizer_.RetainOnly(active_track_ids);
     ROS_DEBUG_STREAM_THROTTLE(

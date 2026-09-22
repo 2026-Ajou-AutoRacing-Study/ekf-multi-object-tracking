@@ -390,6 +390,8 @@ private:
     ros::Subscriber s_lidar_objects_;
     ros::Subscriber s_odometry_;
     ros::Publisher p_track_objects_;
+    ros::Publisher p_center_motion_active_objects_;
+    ros::Publisher p_center_motion_inactive_objects_;
 
     ros::Publisher p_all_track_;
     ros::Publisher p_all_track_info_;
@@ -408,6 +410,8 @@ private:
 
     jsk_recognition_msgs::BoundingBoxArray o_jsk_tracked_objects_;
     autoware_perception_msgs::TrackedObjects o_tracked_objects_;
+    autoware_perception_msgs::TrackedObjects o_center_motion_active_objects_;
+    autoware_perception_msgs::TrackedObjects o_center_motion_inactive_objects_;
     visualization_msgs::MarkerArray o_vis_track_info_;
     visualization_msgs::Marker o_vis_ego_stl_;
 
@@ -436,6 +440,7 @@ private:
 
     // Config
     MultiClassObjectTrackingConfig config_;
+    bool publish_center_motion_diagnostics_{false};
 
     std::string cfg_lidar_objects_topic_ = "";
     std::string cfg_odometry_topic_ = "";

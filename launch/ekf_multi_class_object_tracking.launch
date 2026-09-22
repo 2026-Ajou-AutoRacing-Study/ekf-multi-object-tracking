@@ -16,6 +16,11 @@
   <arg name="detection_velocity_fusion_mode" default="0"/>
   <arg name="detection_velocity_noise_std_mps" default="1.0"/>
   <arg name="center_motion_velocity_fusion" default="false"/>
+  <arg name="publish_center_motion_diagnostics" default="false"/>
+  <arg name="center_motion_active_objects"
+       default="/perception/object_recognition/tracking/center_motion_active_objects"/>
+  <arg name="center_motion_inactive_objects"
+       default="/perception/object_recognition/tracking/center_motion_inactive_objects"/>
   <arg name="center_motion_fuse_ekf_state" default="true"/>
   <arg name="center_motion_override_output_velocity" default="false"/>
   <arg name="center_motion_maximum_output_age_sec" default="0.40"/>
@@ -57,6 +62,8 @@
          value="$(arg detection_velocity_noise_std_mps)"/>
   <param name="configure/center_motion_velocity_fusion"
          value="$(arg center_motion_velocity_fusion)"/>
+  <param name="configure/publish_center_motion_diagnostics"
+         value="$(arg publish_center_motion_diagnostics)"/>
   <param name="configure/center_motion_fuse_ekf_state"
          value="$(arg center_motion_fuse_ekf_state)"/>
   <param name="configure/center_motion_override_output_velocity"
@@ -97,5 +104,9 @@
     <param name="world_frame_id" value="$(arg world_frame_id)"/>
     <remap from="~input/objects" to="$(arg input_objects)"/>
     <remap from="~output/objects" to="$(arg output_objects)"/>
+    <remap from="~diagnostics/center_motion_active_objects"
+           to="$(arg center_motion_active_objects)"/>
+    <remap from="~diagnostics/center_motion_inactive_objects"
+           to="$(arg center_motion_inactive_objects)"/>
   </node>
 </launch>
