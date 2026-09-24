@@ -142,6 +142,22 @@ TEST(DetectionVelocityFusion, OutputOnlyModePreservesEkfVelocityState) {
   EXPECT_DOUBLE_EQ(updated.detector_velocity_y, 3.0);
 }
 
+TEST(DetectionVelocityFusion, UncertaintyModeStoresMeasurementVariance) {
+  MultiClassObjectTrackingConfig config;
+  config.detection_velocity_fusion_mode = 5;
+  auto tracker = std::make_unique<EkfMultiObjectTracking>(config);
+
+  auto measurement = Measurement(1.0, 0.0, 0.0, true, 7.0, 2.0);
+  measurement.velocity_variance_mps2 = 0.36;
+  Update(*tracker, measurement);
+  const auto& initialized = InitializedTrack(tracker->GetTrackResults());
+
+  EXPECT_DOUBLE_EQ(initialized.state_vec(S_VX), 0.0);
+  EXPECT_DOUBLE_EQ(initialized.state_vec(S_VY), 0.0);
+  EXPECT_TRUE(initialized.has_detector_velocity);
+  EXPECT_DOUBLE_EQ(initialized.detector_velocity_variance_mps2, 0.36);
+}
+
 TEST(CenterMotionVelocityFusion, WaitsForMinimumCausalBaseline) {
   MultiClassObjectTrackingConfig off_config;
   off_config.global_coord_track = true;

@@ -109,6 +109,7 @@ struct TrackStruct {
     double detector_velocity_x{0.0};
     double detector_velocity_y{0.0};
     double detector_velocity_time{0.0};
+    double detector_velocity_variance_mps2{1.0};
     double detection_confidence{0.0};
     unsigned int age{0};
 
@@ -212,6 +213,7 @@ struct TrackStruct {
         detector_velocity_x = 0.0;
         detector_velocity_y = 0.0;
         detector_velocity_time = 0.0;
+        detector_velocity_variance_mps2 = 1.0;
         detection_confidence = 0.0;
         age = 0;
 
@@ -245,6 +247,7 @@ struct Meastruct {
     unsigned int id{0};
     float detection_confidence{1.0};
     bool has_velocity{false};
+    double velocity_variance_mps2{1.0};
 
     ObjectClass classification;
     ObjectDimension dimension;
@@ -290,6 +293,8 @@ struct MultiClassObjectTrackingConfig {
     // 3: initialize and update only during the configured early-track window,
     // 4: keep the EKF position-only and expose a gated early longitudinal
     //    detector velocity at publication time.
+    // 5: keep the EKF position-only and blend longitudinal velocity at
+    //    publication time according to detector/tracker uncertainty.
     int detection_velocity_fusion_mode{0};
     double detection_velocity_noise_std_mps{1.0};
     double detection_velocity_update_max_track_age_sec{1.0};

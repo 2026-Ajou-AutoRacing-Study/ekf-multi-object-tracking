@@ -551,6 +551,7 @@ void EkfMultiObjectTrackingNode::ConvertDetectObjectToMeastruct(const ros_interf
     meas.detection_confidence = detect_object.confidence_score;
     meas.classification = mc_mot::ObjectClass(detect_object.classification);
     meas.has_velocity = detect_object.has_velocity;
+    meas.velocity_variance_mps2 = detect_object.velocity_variance_mps2;
 
     meas.state.time_stamp = detect_object.state.header.stamp;
     meas.state.x = detect_object.state.x;
@@ -603,15 +604,16 @@ void EkfMultiObjectTrackingNode::BuildTrackedObjects(
             track_structs.time_stamp - track.detector_velocity_time;
         const double track_age =
             track_structs.time_stamp - track.initialization_time;
-        const bool use_early_longitudinal_detector_velocity =
-            config_.detection_velocity_fusion_mode == 4 &&
+        const bool use_longitudinal_detector_velocity =
+            (config_.detection_velocity_fusion_mode == 4 ||
+             config_.detection_velocity_fusion_mode == 5) &&
             is_vehicle && track.has_detector_velocity &&
             track_age >= -1.0e-6 &&
             track_age <= config_.detection_velocity_update_max_track_age_sec &&
             detector_velocity_age >= -1.0e-6 &&
             detector_velocity_age <=
                 config_.detection_velocity_maximum_output_age_sec;
-        if (use_early_longitudinal_detector_velocity) {
+        if (use_longitudinal_detector_velocity) {
             const double heading_x = std::cos(track.state_vec(S_YAW));
             const double heading_y = std::sin(track.state_vec(S_YAW));
             const double tracker_longitudinal =
@@ -623,16 +625,33 @@ void EkfMultiObjectTrackingNode::BuildTrackedObjects(
             const double configured_blend = std::max(
                 0.0, std::min(
                     1.0, config_.detection_velocity_longitudinal_blend));
-            const double age_fraction = std::max(
-                0.0, std::min(
-                    1.0,
-                    track_age /
-                        std::max(
-                            1.0e-6,
-                            config_.detection_velocity_update_max_track_age_sec)));
-            // Fade to the position-only estimate instead of introducing a
-            // velocity discontinuity at the end of the early-track window.
-            const double blend = configured_blend * (1.0 - age_fraction);
+            double blend = configured_blend;
+            if (config_.detection_velocity_fusion_mode == 4) {
+                const double age_fraction = std::max(
+                    0.0, std::min(
+                        1.0,
+                        track_age /
+                            std::max(
+                                1.0e-6,
+                                config_.detection_velocity_update_max_track_age_sec)));
+                // Fade to the position-only estimate instead of introducing
+                // a velocity discontinuity at the end of the early window.
+                blend *= (1.0 - age_fraction);
+            } else {
+                const double tracker_variance = std::max(
+                    1.0e-6,
+                    heading_x * heading_x * track.state_cov(S_VX, S_VX) +
+                    2.0 * heading_x * heading_y *
+                        track.state_cov(S_VX, S_VY) +
+                    heading_y * heading_y * track.state_cov(S_VY, S_VY));
+                const double detector_variance = std::max(
+                    1.0e-6, track.detector_velocity_variance_mps2);
+                // Inverse-variance fusion: trust the detector while a young
+                // position-only track is uncertain, then yield continuously
+                // as the track covariance contracts.
+                blend *= tracker_variance /
+                    (tracker_variance + detector_variance);
+            }
             const double longitudinal_delta =
                 blend * (detector_longitudinal - tracker_longitudinal);
             output_velocity_x += longitudinal_delta * heading_x;

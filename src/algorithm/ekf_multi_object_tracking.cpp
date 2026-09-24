@@ -359,7 +359,8 @@ void EkfMultiObjectTracking::UpdateTrack(mc_mot::TrackStruct &track, const mc_mo
             config_.detection_velocity_noise_std_mps);
     }
     if (measurement.has_velocity &&
-        config_.detection_velocity_fusion_mode == 4 &&
+        (config_.detection_velocity_fusion_mode == 4 ||
+         config_.detection_velocity_fusion_mode == 5) &&
         (measurement.classification == mc_mot::ObjectClass::CAR ||
          measurement.classification == mc_mot::ObjectClass::TRUCK)) {
         const double heading_x = std::cos(track.state_vec(S_YAW));
@@ -376,6 +377,8 @@ void EkfMultiObjectTracking::UpdateTrack(mc_mot::TrackStruct &track, const mc_mo
             track.detector_velocity_x = measurement.state.v_x;
             track.detector_velocity_y = measurement.state.v_y;
             track.detector_velocity_time = measurement.state.time_stamp;
+            track.detector_velocity_variance_mps2 =
+                measurement.velocity_variance_mps2;
         }
     }
 
@@ -616,13 +619,16 @@ void EkfMultiObjectTracking::InitTrack(mc_mot::TrackStruct &track, const mc_mot:
         track.state_cov(S_VY, S_VX) = 0.0;
     }
     if (measurement.has_velocity &&
-        config_.detection_velocity_fusion_mode == 4 &&
+        (config_.detection_velocity_fusion_mode == 4 ||
+         config_.detection_velocity_fusion_mode == 5) &&
         (measurement.classification == mc_mot::ObjectClass::CAR ||
          measurement.classification == mc_mot::ObjectClass::TRUCK)) {
         track.has_detector_velocity = true;
         track.detector_velocity_x = measurement.state.v_x;
         track.detector_velocity_y = measurement.state.v_y;
         track.detector_velocity_time = measurement.state.time_stamp;
+        track.detector_velocity_variance_mps2 =
+            measurement.velocity_variance_mps2;
     }
 
     Eigen::Matrix3d S = H_ * track.state_cov * H_.transpose() + R_;

@@ -134,6 +134,7 @@ namespace ros_interface {
         float       confidence_score;
         ObjectClass classification;
         bool has_velocity{false};
+        double velocity_variance_mps2{1.0};
 
         ObjectDimension dimension;        
         Object3DState   state;
@@ -300,6 +301,19 @@ private:
                         cosine * twist.linear.x - sine * twist.linear.y;
                     detect_object.state.v_y =
                         sine * twist.linear.x + cosine * twist.linear.y;
+                    const auto& covariance =
+                        object.kinematics.twist_with_covariance.covariance;
+                    const double longitudinal_variance = covariance[0];
+                    if (object.kinematics.has_twist_covariance &&
+                        std::isfinite(longitudinal_variance) &&
+                        longitudinal_variance > 0.0) {
+                        detect_object.velocity_variance_mps2 =
+                            longitudinal_variance;
+                    } else {
+                        detect_object.velocity_variance_mps2 =
+                            config_.detection_velocity_noise_std_mps *
+                            config_.detection_velocity_noise_std_mps;
+                    }
                 } else {
                     detect_object.has_velocity = false;
                 }
