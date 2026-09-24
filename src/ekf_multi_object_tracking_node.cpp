@@ -359,6 +359,18 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
         "configure/detection_velocity_update_max_track_age_sec",
         config_.detection_velocity_update_max_track_age_sec,
         1.0);
+    nh.param<double>(
+        "configure/detection_velocity_maximum_output_age_sec",
+        config_.detection_velocity_maximum_output_age_sec,
+        0.25);
+    nh.param<double>(
+        "configure/detection_velocity_max_longitudinal_innovation_mps",
+        config_.detection_velocity_max_longitudinal_innovation_mps,
+        5.0);
+    nh.param<double>(
+        "configure/detection_velocity_longitudinal_blend",
+        config_.detection_velocity_longitudinal_blend,
+        1.0);
     nh.param<bool>(
         "configure/center_motion_velocity_fusion",
         config_.center_motion_velocity_fusion,
@@ -587,6 +599,45 @@ void EkfMultiObjectTrackingNode::BuildTrackedObjects(
             classification.label == autoware_perception_msgs::ObjectClassification::TRAILER;
         double output_velocity_x = track.state_vec(S_VX);
         double output_velocity_y = track.state_vec(S_VY);
+        const double detector_velocity_age =
+            track_structs.time_stamp - track.detector_velocity_time;
+        const double track_age =
+            track_structs.time_stamp - track.initialization_time;
+        const bool use_early_longitudinal_detector_velocity =
+            config_.detection_velocity_fusion_mode == 4 &&
+            is_vehicle && track.has_detector_velocity &&
+            track_age >= -1.0e-6 &&
+            track_age <= config_.detection_velocity_update_max_track_age_sec &&
+            detector_velocity_age >= -1.0e-6 &&
+            detector_velocity_age <=
+                config_.detection_velocity_maximum_output_age_sec;
+        if (use_early_longitudinal_detector_velocity) {
+            const double heading_x = std::cos(track.state_vec(S_YAW));
+            const double heading_y = std::sin(track.state_vec(S_YAW));
+            const double tracker_longitudinal =
+                heading_x * output_velocity_x +
+                heading_y * output_velocity_y;
+            const double detector_longitudinal =
+                heading_x * track.detector_velocity_x +
+                heading_y * track.detector_velocity_y;
+            const double configured_blend = std::max(
+                0.0, std::min(
+                    1.0, config_.detection_velocity_longitudinal_blend));
+            const double age_fraction = std::max(
+                0.0, std::min(
+                    1.0,
+                    track_age /
+                        std::max(
+                            1.0e-6,
+                            config_.detection_velocity_update_max_track_age_sec)));
+            // Fade to the position-only estimate instead of introducing a
+            // velocity discontinuity at the end of the early-track window.
+            const double blend = configured_blend * (1.0 - age_fraction);
+            const double longitudinal_delta =
+                blend * (detector_longitudinal - tracker_longitudinal);
+            output_velocity_x += longitudinal_delta * heading_x;
+            output_velocity_y += longitudinal_delta * heading_y;
+        }
         const double center_motion_age =
             track_structs.time_stamp - track.last_center_motion_fusion_time;
         const bool center_motion_available =
@@ -1170,6 +1221,21 @@ void EkfMultiObjectTrackingNode::TransformMeasLiDAR2Global(mc_mot::Meastruct& i_
     Eigen::Affine3d world_to_object_affine = world_to_lidar_affine * lidar_to_object_affine;
     Eigen::Vector3d world_to_object_translation = world_to_object_affine.translation();
     Eigen::Matrix3d world_to_object_rotation = world_to_object_affine.rotation();
+
+    if (i_meas.has_velocity) {
+        // Detector velocity is an absolute object velocity expressed in the
+        // LiDAR axes. Rotate the vector into the map frame just like position
+        // and yaw. Do not add Ego velocity: the Base4 target is not a
+        // relative velocity.
+        const double local_velocity_x = i_meas.state.v_x;
+        const double local_velocity_y = i_meas.state.v_y;
+        const double cosine = std::cos(object_synced_state.yaw);
+        const double sine = std::sin(object_synced_state.yaw);
+        i_meas.state.v_x =
+            cosine * local_velocity_x - sine * local_velocity_y;
+        i_meas.state.v_y =
+            sine * local_velocity_x + cosine * local_velocity_y;
+    }
 
     i_meas.state.x = world_to_object_translation(0);
     i_meas.state.y = world_to_object_translation(1);

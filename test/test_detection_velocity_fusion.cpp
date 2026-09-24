@@ -121,6 +121,27 @@ TEST(DetectionVelocityFusion, EarlyWindowStopsCorrectingMatureTrack) {
   EXPECT_LT(mature_velocity, 15.0);
 }
 
+TEST(DetectionVelocityFusion, OutputOnlyModePreservesEkfVelocityState) {
+  MultiClassObjectTrackingConfig config;
+  config.detection_velocity_fusion_mode = 4;
+  auto tracker = std::make_unique<EkfMultiObjectTracking>(config);
+
+  Update(*tracker, Measurement(1.0, 0.0, 0.0, true, 7.0, 2.0));
+  const auto& initialized = InitializedTrack(tracker->GetTrackResults());
+  EXPECT_DOUBLE_EQ(initialized.state_vec(S_VX), 0.0);
+  EXPECT_DOUBLE_EQ(initialized.state_vec(S_VY), 0.0);
+  EXPECT_TRUE(initialized.has_detector_velocity);
+  EXPECT_DOUBLE_EQ(initialized.detector_velocity_x, 7.0);
+  EXPECT_DOUBLE_EQ(initialized.detector_velocity_y, 2.0);
+
+  tracker->RunPrediction(0.1);
+  Update(*tracker, Measurement(1.1, 0.5, 0.0, true, 5.0, 3.0));
+  const auto& updated = InitializedTrack(tracker->GetTrackResults());
+  EXPECT_LT(updated.state_vec(S_VX), 5.0);
+  EXPECT_DOUBLE_EQ(updated.detector_velocity_x, 5.0);
+  EXPECT_DOUBLE_EQ(updated.detector_velocity_y, 3.0);
+}
+
 TEST(CenterMotionVelocityFusion, WaitsForMinimumCausalBaseline) {
   MultiClassObjectTrackingConfig off_config;
   off_config.global_coord_track = true;

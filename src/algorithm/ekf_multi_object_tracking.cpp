@@ -358,6 +358,26 @@ void EkfMultiObjectTracking::UpdateTrack(mc_mot::TrackStruct &track, const mc_mo
             measurement.state.v_y,
             config_.detection_velocity_noise_std_mps);
     }
+    if (measurement.has_velocity &&
+        config_.detection_velocity_fusion_mode == 4 &&
+        (measurement.classification == mc_mot::ObjectClass::CAR ||
+         measurement.classification == mc_mot::ObjectClass::TRUCK)) {
+        const double heading_x = std::cos(track.state_vec(S_YAW));
+        const double heading_y = std::sin(track.state_vec(S_YAW));
+        const double detector_longitudinal =
+            heading_x * measurement.state.v_x +
+            heading_y * measurement.state.v_y;
+        const double tracker_longitudinal =
+            heading_x * track.state_vec(S_VX) +
+            heading_y * track.state_vec(S_VY);
+        if (std::abs(detector_longitudinal - tracker_longitudinal) <=
+            config_.detection_velocity_max_longitudinal_innovation_mps) {
+            track.has_detector_velocity = true;
+            track.detector_velocity_x = measurement.state.v_x;
+            track.detector_velocity_y = measurement.state.v_y;
+            track.detector_velocity_time = measurement.state.time_stamp;
+        }
+    }
 
     UpdateCenterMotionVelocity(track, measurement);
 
@@ -582,7 +602,9 @@ void EkfMultiObjectTracking::InitTrack(mc_mot::TrackStruct &track, const mc_mot:
     track.state_vec(S_X) = measurement.state.x;
     track.state_vec(S_Y) = measurement.state.y;
     track.state_vec(S_YAW) = measurement.state.yaw;
-    if (measurement.has_velocity && config_.detection_velocity_fusion_mode >= 1) {
+    if (measurement.has_velocity &&
+        config_.detection_velocity_fusion_mode >= 1 &&
+        config_.detection_velocity_fusion_mode <= 3) {
         track.state_vec(S_VX) = measurement.state.v_x;
         track.state_vec(S_VY) = measurement.state.v_y;
         const double variance =
@@ -592,6 +614,15 @@ void EkfMultiObjectTracking::InitTrack(mc_mot::TrackStruct &track, const mc_mot:
         track.state_cov(S_VY, S_VY) = variance;
         track.state_cov(S_VX, S_VY) = 0.0;
         track.state_cov(S_VY, S_VX) = 0.0;
+    }
+    if (measurement.has_velocity &&
+        config_.detection_velocity_fusion_mode == 4 &&
+        (measurement.classification == mc_mot::ObjectClass::CAR ||
+         measurement.classification == mc_mot::ObjectClass::TRUCK)) {
+        track.has_detector_velocity = true;
+        track.detector_velocity_x = measurement.state.v_x;
+        track.detector_velocity_y = measurement.state.v_y;
+        track.detector_velocity_time = measurement.state.time_stamp;
     }
 
     Eigen::Matrix3d S = H_ * track.state_cov * H_.transpose() + R_;

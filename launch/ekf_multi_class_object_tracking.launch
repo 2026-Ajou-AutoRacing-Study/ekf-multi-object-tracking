@@ -16,6 +16,9 @@
   <arg name="detection_velocity_fusion_mode" default="0"/>
   <arg name="detection_velocity_noise_std_mps" default="1.0"/>
   <arg name="detection_velocity_update_max_track_age_sec" default="1.0"/>
+  <arg name="detection_velocity_maximum_output_age_sec" default="0.25"/>
+  <arg name="detection_velocity_max_longitudinal_innovation_mps" default="5.0"/>
+  <arg name="detection_velocity_longitudinal_blend" default="1.0"/>
   <arg name="center_motion_velocity_fusion" default="false"/>
   <arg name="publish_center_motion_diagnostics" default="false"/>
   <arg name="center_motion_active_objects"
@@ -63,6 +66,12 @@
          value="$(arg detection_velocity_noise_std_mps)"/>
   <param name="configure/detection_velocity_update_max_track_age_sec"
          value="$(arg detection_velocity_update_max_track_age_sec)"/>
+  <param name="configure/detection_velocity_maximum_output_age_sec"
+         value="$(arg detection_velocity_maximum_output_age_sec)"/>
+  <param name="configure/detection_velocity_max_longitudinal_innovation_mps"
+         value="$(arg detection_velocity_max_longitudinal_innovation_mps)"/>
+  <param name="configure/detection_velocity_longitudinal_blend"
+         value="$(arg detection_velocity_longitudinal_blend)"/>
   <param name="configure/center_motion_velocity_fusion"
          value="$(arg center_motion_velocity_fusion)"/>
   <param name="configure/publish_center_motion_diagnostics"
