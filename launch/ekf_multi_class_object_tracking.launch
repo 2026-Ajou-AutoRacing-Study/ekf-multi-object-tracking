@@ -5,6 +5,14 @@
        default="/perception/object_recognition/tracking/objects"/>
   <arg name="world_frame_id" default="map"/>
   <arg name="use_sim_time" default="false"/>
+  <arg name="time_aware_track_lifecycle" default="true"/>
+  <arg name="confirmed_track_max_coast_time_sec" default="0.50"/>
+  <arg name="confirmed_stationary_track_max_coast_time_sec" default="1.00"/>
+  <arg name="lifecycle_stationary_speed_threshold_mps" default="2.0"/>
+  <arg name="suppress_duplicate_track_birth" default="true"/>
+  <arg name="duplicate_birth_suppression_distance_m" default="0.75"/>
+  <arg name="duplicate_birth_minimum_max_dimension_m" default="1.0"/>
+  <arg name="duplicate_birth_maximum_dimension_ratio" default="2.0"/>
   <arg name="canonicalize_vehicle_orientation_to_motion" default="true"/>
   <arg name="orientation_canonicalization_min_speed_mps" default="1.0"/>
   <arg name="orientation_flip_enter_error_deg" default="100.0"/>
@@ -53,6 +61,22 @@
   <param name="configure/use_kinematic_model"
          value="$(arg use_kinematic_model)"/>
   <param name="use_sim_time" value="$(arg use_sim_time)" />
+  <param name="configure/time_aware_track_lifecycle"
+         value="$(arg time_aware_track_lifecycle)"/>
+  <param name="configure/confirmed_track_max_coast_time_sec"
+         value="$(arg confirmed_track_max_coast_time_sec)"/>
+  <param name="configure/confirmed_stationary_track_max_coast_time_sec"
+         value="$(arg confirmed_stationary_track_max_coast_time_sec)"/>
+  <param name="configure/lifecycle_stationary_speed_threshold_mps"
+         value="$(arg lifecycle_stationary_speed_threshold_mps)"/>
+  <param name="configure/suppress_duplicate_track_birth"
+         value="$(arg suppress_duplicate_track_birth)"/>
+  <param name="configure/duplicate_birth_suppression_distance_m"
+         value="$(arg duplicate_birth_suppression_distance_m)"/>
+  <param name="configure/duplicate_birth_minimum_max_dimension_m"
+         value="$(arg duplicate_birth_minimum_max_dimension_m)"/>
+  <param name="configure/duplicate_birth_maximum_dimension_ratio"
+         value="$(arg duplicate_birth_maximum_dimension_ratio)"/>
   <node pkg="ekf_multi_object_tracking"
         type="ekf_multi_object_tracking"
         name="ekf_multi_object_tracking"
