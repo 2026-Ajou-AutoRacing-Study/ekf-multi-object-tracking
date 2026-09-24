@@ -335,6 +335,38 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
     nh.getParam("configure/lidar_rotation_period", config_.lidar_rotation_period);
     nh.getParam("configure/lidar_sync_scan_start", config_.lidar_sync_scan_start);
     nh.getParam("configure/max_association_dist_m", config_.max_association_dist_m);
+    nh.param<bool>(
+        "configure/time_aware_track_lifecycle",
+        config_.time_aware_track_lifecycle,
+        true);
+    nh.param<double>(
+        "configure/confirmed_track_max_coast_time_sec",
+        config_.confirmed_track_max_coast_time_sec,
+        0.50);
+    nh.param<double>(
+        "configure/confirmed_stationary_track_max_coast_time_sec",
+        config_.confirmed_stationary_track_max_coast_time_sec,
+        1.00);
+    nh.param<double>(
+        "configure/lifecycle_stationary_speed_threshold_mps",
+        config_.lifecycle_stationary_speed_threshold_mps,
+        2.0);
+    nh.param<bool>(
+        "configure/suppress_duplicate_track_birth",
+        config_.suppress_duplicate_track_birth,
+        true);
+    nh.param<double>(
+        "configure/duplicate_birth_suppression_distance_m",
+        config_.duplicate_birth_suppression_distance_m,
+        0.75);
+    nh.param<double>(
+        "configure/duplicate_birth_minimum_max_dimension_m",
+        config_.duplicate_birth_minimum_max_dimension_m,
+        1.0);
+    nh.param<double>(
+        "configure/duplicate_birth_maximum_dimension_ratio",
+        config_.duplicate_birth_maximum_dimension_ratio,
+        2.0);
 
     int i_prediction_model = 0;
     nh.getParam("configure/prediction_model", i_prediction_model);
@@ -452,6 +484,25 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
         config_.maximum_fixed_output_prediction_age_sec);
     nh.getParam("configure/max_steer_deg", config_.max_steer_deg);
     nh.getParam("configure/visualize_mesh", config_.visualize_mesh);
+
+    if (config_.confirmed_track_max_coast_time_sec <= 0.0 ||
+        config_.confirmed_stationary_track_max_coast_time_sec <= 0.0 ||
+        config_.duplicate_birth_suppression_distance_m <= 0.0 ||
+        config_.duplicate_birth_minimum_max_dimension_m < 0.0 ||
+        config_.duplicate_birth_maximum_dimension_ratio < 1.0) {
+        ROS_FATAL("[EKF tracker] Invalid lifecycle/duplicate-birth configuration");
+        ros::shutdown();
+        return;
+    }
+    ROS_INFO_STREAM(
+        "[EKF tracker] lifecycle=" << config_.time_aware_track_lifecycle
+        << " moving_coast=" << config_.confirmed_track_max_coast_time_sec
+        << " stationary_coast="
+        << config_.confirmed_stationary_track_max_coast_time_sec
+        << " duplicate_birth_guard="
+        << config_.suppress_duplicate_track_birth
+        << " duplicate_birth_distance="
+        << config_.duplicate_birth_suppression_distance_m);
 
     // Vehicle origin parameters
     int i_vehicle_origin;

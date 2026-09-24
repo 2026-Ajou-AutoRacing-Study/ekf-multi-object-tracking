@@ -100,4 +100,12 @@ if(CATKIN_ENABLE_TESTING)
   if(TARGET test_detection_velocity_fusion)
     target_link_libraries(test_detection_velocity_fusion ${catkin_LIBRARIES})
   endif()
+  catkin_add_gtest(
+    test_track_lifecycle
+    test/test_track_lifecycle.cpp
+    src/algorithm/ekf_multi_object_tracking.cpp
+  )
+  if(TARGET test_track_lifecycle)
+    target_link_libraries(test_track_lifecycle ${catkin_LIBRARIES})
+  endif()
 endif()

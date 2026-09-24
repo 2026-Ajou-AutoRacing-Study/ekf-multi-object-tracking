@@ -22,6 +22,18 @@ configure:
   lidar_sync_scan_start: false  # false: Sync lidar time to scan end, true: Sync lidar time to scan start
 
   max_association_dist_m: 5.0 # Maximum association distance
+  # Confirmed-track lifetime is wall-time based so a temporary detector miss
+  # does not become harsher merely because LiDAR/detector Hz is high.
+  time_aware_track_lifecycle: true
+  confirmed_track_max_coast_time_sec: 0.50
+  confirmed_stationary_track_max_coast_time_sec: 1.00
+  lifecycle_stationary_speed_threshold_mps: 2.0
+  # Prevent a low-IoU large-object shape outlier from starting a second ID
+  # beside a mature track that already received its measurement this frame.
+  suppress_duplicate_track_birth: true
+  duplicate_birth_suppression_distance_m: 0.75
+  duplicate_birth_minimum_max_dimension_m: 1.0
+  duplicate_birth_maximum_dimension_ratio: 2.0
   prediction_model: 1  # Team default: CTRV (0: CV, 1: CTRV, 2: CA, 3: CTRA)
   system_noise_std_xy_m: 0.01
   system_noise_std_yaw_deg: 0.5
