@@ -103,6 +103,18 @@ remaps. The `topic_name/output_track_jsk` and
 - **lidar_rotation_period**: Sets the LiDAR rotation period.
 - **lidar_sync_scan_start**: Synchronizes LiDAR time to scan start if set to `true`.
 - **max_association_dist_m**: Maximum distance for track association.
+- **time_aware_track_lifecycle**: Uses elapsed message time, rather than a
+  detector-frame count, to retire confirmed tracks. Tentative tracks keep the
+  original strict confirmation/deletion behavior.
+- **confirmed_track_max_coast_time_sec**: Maximum unobserved lifetime for a
+  confirmed moving track (`0.50 s` by default).
+- **confirmed_stationary_track_max_coast_time_sec**: Maximum unobserved
+  lifetime for confirmed UNKNOWN or low-speed CAR/TRUCK tracks (`1.00 s` by
+  default). Pedestrians do not use this longer stationary lifetime.
+- **suppress_duplicate_track_birth**: Prevents an unmatched large-object
+  measurement from creating a second ID very near a mature track already
+  associated in the same frame. The distance, minimum size, and maximum size
+  ratio are controlled by the corresponding `duplicate_birth_*` parameters.
 - **prediction_model**: Selects the prediction model.
   - `0`: CV
   - `1`: CTRV (default in the AjouNice2026 team fork)

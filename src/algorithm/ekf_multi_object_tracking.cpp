@@ -72,11 +72,13 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
 
     int init_count = 0;
     int asso_count = 0;
-    // Update associated tracks and add new tracks based on matching results
+    // Update all associated tracks first.  Birth suppression must inspect the
+    // complete set of tracks associated in this frame; processing measurements
+    // in input order could otherwise create a duplicate before the matched
+    // measurement later in the array marks its mature track as associated.
     for (int meas_idx = 0; meas_idx < i_meas_num; ++meas_idx) {
         int track_idx = assignment[meas_idx];
 
-        // If a measurement is associated and the associated track is initialized
         if (track_idx != -1 && all_tracks_[track_idx].is_init == true) {
             UpdateTrack(all_tracks_[track_idx], measurements.meas[meas_idx]);
 
@@ -87,17 +89,26 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
 
             asso_count++;
         }
-        else {
-            // Add new measurement not in any track
-            mc_mot::TrackStruct new_track;
+    }
 
-            InitTrack(new_track, measurements.meas[meas_idx]);
-
-            all_tracks_[cur_track_id_] = new_track;
-
-            UpdateTrackId(); // Increment cur_track_id_
-            init_count++;
+    // Only after all matched tracks have been updated, consider unmatched
+    // measurements as new-track candidates.
+    for (int meas_idx = 0; meas_idx < i_meas_num; ++meas_idx) {
+        const int track_idx = assignment[meas_idx];
+        if (track_idx != -1 && all_tracks_[track_idx].is_init == true) {
+            continue;
         }
+        if (ShouldSuppressDuplicateTrackBirth(measurements.meas[meas_idx])) {
+            continue;
+        }
+        mc_mot::TrackStruct new_track;
+
+        InitTrack(new_track, measurements.meas[meas_idx]);
+
+        all_tracks_[cur_track_id_] = new_track;
+
+        UpdateTrackId(); // Increment cur_track_id_
+        init_count++;
     }
 
     // Update information for unassociated tracks
@@ -108,7 +119,8 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
             track.updateDetectionCount(false);
 
             // Reset outdated tracks
-            if (track.is_init == true && track.isOutdated() == true) {
+            if (track.is_init == true &&
+                ShouldDeleteUnassociatedTrack(track, measurements.time_stamp)) {
                 track.reset();
                 i_deleted_num++;
             }
@@ -369,6 +381,7 @@ void EkfMultiObjectTracking::UpdateTrack(mc_mot::TrackStruct &track, const mc_mo
     track.is_associated = true;
     track.updateDetectionCount(true);
     track.update_time = measurement.state.time_stamp;
+    track.last_measurement_time = measurement.state.time_stamp;
     track.detection_confidence = config_.dimension_filter_alpha * measurement.detection_confidence +
                                  (1.0 - config_.dimension_filter_alpha) * track.detection_confidence;
     track.age++;
@@ -416,6 +429,7 @@ void EkfMultiObjectTracking::UpdateTrack(mc_mot::TrackStruct &track, const mc_mo
 void EkfMultiObjectTracking::InitTrack(mc_mot::TrackStruct &track, const mc_mot::Meastruct &measurement) {
     track.track_id = cur_track_id_;
     track.update_time = measurement.state.time_stamp;
+    track.last_measurement_time = measurement.state.time_stamp;
     track.detection_confidence = measurement.detection_confidence;
 
     track.state_vec(S_X) = measurement.state.x;
@@ -533,14 +547,91 @@ void EkfMultiObjectTracking::UpdateMatrix() {
     H_(2, 2) = 1.0; // yaw
 }
 
+bool EkfMultiObjectTracking::AreLifecycleClassesCompatible(
+        const mc_mot::ObjectClass measurement_class,
+        const mc_mot::ObjectClass track_class) const {
+    const bool measurement_is_pedestrian =
+        measurement_class == mc_mot::ObjectClass::PEDESTRIAN;
+    const bool track_is_pedestrian =
+        track_class == mc_mot::ObjectClass::PEDESTRIAN;
+    return measurement_is_pedestrian == track_is_pedestrian;
+}
+
+bool EkfMultiObjectTracking::ShouldDeleteUnassociatedTrack(
+        const mc_mot::TrackStruct &track,
+        const double measurement_time) const {
+    if (!track.is_confirmed || !config_.time_aware_track_lifecycle) {
+        return track.isOutdated();
+    }
+
+    const double speed = std::hypot(
+        track.state_vec(S_VX), track.state_vec(S_VY));
+    const auto representative_class =
+        static_cast<mc_mot::ObjectClass>(track.getRepClass());
+    const bool class_can_be_stationary_obstacle =
+        representative_class == mc_mot::ObjectClass::UNKNOWN ||
+        representative_class == mc_mot::ObjectClass::CAR ||
+        representative_class == mc_mot::ObjectClass::TRUCK;
+    const bool stationary =
+        representative_class == mc_mot::ObjectClass::UNKNOWN ||
+        (class_can_be_stationary_obstacle &&
+         speed <= config_.lifecycle_stationary_speed_threshold_mps);
+    const double maximum_coast_time = stationary
+        ? config_.confirmed_stationary_track_max_coast_time_sec
+        : config_.confirmed_track_max_coast_time_sec;
+    return measurement_time - track.last_measurement_time > maximum_coast_time;
+}
+
+bool EkfMultiObjectTracking::ShouldSuppressDuplicateTrackBirth(
+        const mc_mot::Meastruct &measurement) const {
+    if (!config_.suppress_duplicate_track_birth) return false;
+
+    const double measurement_max_dimension = std::max(
+        measurement.dimension.length, measurement.dimension.width);
+    if (measurement_max_dimension <
+        config_.duplicate_birth_minimum_max_dimension_m) {
+        return false;
+    }
+
+    for (const auto &track : all_tracks_) {
+        if (!track.is_init || !track.is_confirmed || !track.is_associated) {
+            continue;
+        }
+        if (!AreLifecycleClassesCompatible(
+                measurement.classification,
+                static_cast<mc_mot::ObjectClass>(track.getRepClass()))) {
+            continue;
+        }
+
+        const double track_max_dimension = std::max(
+            track.dimension.length, track.dimension.width);
+        if (track_max_dimension <
+            config_.duplicate_birth_minimum_max_dimension_m) {
+            continue;
+        }
+        const double dimension_ratio = std::max(
+            measurement_max_dimension / std::max(1.0e-6, track_max_dimension),
+            track_max_dimension / std::max(1.0e-6, measurement_max_dimension));
+        if (dimension_ratio >
+            config_.duplicate_birth_maximum_dimension_ratio) {
+            continue;
+        }
+        if (CalculateDistance(measurement.state, track.state_vec) <=
+            config_.duplicate_birth_suppression_distance_m) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // ======== Utils Functions ============
 
 double EkfMultiObjectTracking::CalculateDistance(const mc_mot::ObjectState &state1,
-                                                   const mc_mot::ObjectState &state2) {
+                                                   const mc_mot::ObjectState &state2) const {
     return std::sqrt(std::pow(state1.x - state2.x, 2) + std::pow(state1.y - state2.y, 2));
 }
 
-double EkfMultiObjectTracking::CalculateDistance(const mc_mot::ObjectState &state1, const Eigen::Vector8d &state2) {
+double EkfMultiObjectTracking::CalculateDistance(const mc_mot::ObjectState &state1, const Eigen::Vector8d &state2) const {
     return std::sqrt(std::pow(state1.x - state2(0), 2) + std::pow(state1.y - state2(1), 2));
 }
 

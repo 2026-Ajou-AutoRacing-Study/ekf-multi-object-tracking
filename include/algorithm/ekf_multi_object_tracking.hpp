@@ -98,6 +98,7 @@ struct ObjectDimension {
 struct TrackStruct {
     int track_id{-1};
     double update_time{0.0};
+    double last_measurement_time{0.0};
     double detection_confidence{0.0};
     unsigned int age{0};
 
@@ -131,7 +132,7 @@ struct TrackStruct {
     }
 
     // Return the number of detections in the recent MAX_HISTORY
-    int countDetectionNum() {
+    int countDetectionNum() const {
         int detection_count = 0;
         for (int i = MAX_HISTORY - 1; i >= 0; --i) {
             if (detection_arr[i] == true) {
@@ -142,7 +143,7 @@ struct TrackStruct {
     }
 
     // Check if the track is outdated
-    bool isOutdated() {
+    bool isOutdated() const {
         // If the number of detections in the recent MAX_HISTORY is less than MAX_HISTORY_FOR_OUTDATED, it is outdated
         return countDetectionNum() < 
                 MAX_HISTORY_FOR_OUTDATED - std::max(0, MAX_HISTORY - static_cast<int>(age) );
@@ -162,7 +163,7 @@ struct TrackStruct {
     }
 
     // Return the representative class of the track
-    int getRepClass() {
+    int getRepClass() const {
         int rep_class = 0;
         double rep_prob = 0.0;
         for (int i = 0; i < CLASS_NUM; i++) {
@@ -175,7 +176,7 @@ struct TrackStruct {
     }
 
     // Return the representative class probability of the track
-    double getRepClassProb() {
+    double getRepClassProb() const {
         int rep_class = 0;
         double rep_prob = 0.0;
         for (int i = 0; i < CLASS_NUM; i++) {
@@ -190,6 +191,7 @@ struct TrackStruct {
     // Reset the track
     void reset() {
         update_time = 0.0;
+        last_measurement_time = 0.0;
         detection_confidence = 0.0;
         age = 0;
 
@@ -246,6 +248,22 @@ struct MultiClassObjectTrackingConfig {
     bool lidar_sync_scan_start{true};
 
     double max_association_dist_m{3.0};
+
+    // Frame-count-only deletion makes the effective lifetime depend on the
+    // detector rate. Confirmed tracks instead coast for a bounded wall-time;
+    // tentative tracks retain the original strict confirmation policy.
+    bool time_aware_track_lifecycle{true};
+    double confirmed_track_max_coast_time_sec{0.50};
+    double confirmed_stationary_track_max_coast_time_sec{1.00};
+    double lifecycle_stationary_speed_threshold_mps{2.0};
+
+    // A low-IoU shape outlier can survive detector NMS beside the valid box.
+    // Do not let such an unmatched measurement create a second track next to
+    // an already-associated mature large-object track.
+    bool suppress_duplicate_track_birth{true};
+    double duplicate_birth_suppression_distance_m{0.75};
+    double duplicate_birth_minimum_max_dimension_m{1.0};
+    double duplicate_birth_maximum_dimension_ratio{2.0};
 
     mc_mot::PredictionModel prediction_model = mc_mot::PredictionModel::CV;
 
@@ -312,11 +330,19 @@ private:
     void MatchPairs(const Eigen::MatrixXd &cost_matrix, std::vector<int> &row_indices, std::vector<int> &col_indices);
     void UpdateTrackId();
     void UpdateMatrix();
+    bool ShouldDeleteUnassociatedTrack(
+        const mc_mot::TrackStruct &track,
+        double measurement_time) const;
+    bool ShouldSuppressDuplicateTrackBirth(
+        const mc_mot::Meastruct &measurement) const;
+    bool AreLifecycleClassesCompatible(
+        mc_mot::ObjectClass measurement_class,
+        mc_mot::ObjectClass track_class) const;
 
 private:
     // Utils
-    double CalculateDistance(const mc_mot::ObjectState &state1, const mc_mot::ObjectState &state2);
-    double CalculateDistance(const mc_mot::ObjectState &state1, const Eigen::Vector8d &state2);
+    double CalculateDistance(const mc_mot::ObjectState &state1, const mc_mot::ObjectState &state2) const;
+    double CalculateDistance(const mc_mot::ObjectState &state1, const Eigen::Vector8d &state2) const;
     double CalculateMahalanobisDistance(const mc_mot::ObjectState &state1, const mc_mot::TrackStruct &track);
     double CalculateYawDotProduct(const double &yaw1, const double &yaw2);
     double CalculateYawCrossProduct(const double &yaw1, const double &yaw2);
