@@ -103,6 +103,7 @@ struct CenterObservation {
 
 struct TrackStruct {
     int track_id{-1};
+    double initialization_time{0.0};
     double update_time{0.0};
     double detection_confidence{0.0};
     unsigned int age{0};
@@ -276,9 +277,11 @@ struct MultiClassObjectTrackingConfig {
     double meas_noise_std_xy_m{0.1};
     double meas_noise_std_yaw_deg{0.1};
     // 0: ignore detector velocity, 1: initialize new tracks only,
-    // 2: initialize and update velocity whenever a valid measurement exists.
+    // 2: initialize and update velocity whenever a valid measurement exists,
+    // 3: initialize and update only during the configured early-track window.
     int detection_velocity_fusion_mode{0};
     double detection_velocity_noise_std_mps{1.0};
+    double detection_velocity_update_max_track_age_sec{1.0};
 
     // Optional causal velocity observation derived from associated raw
     // detection centers in the global frame.  Kept separate from detector

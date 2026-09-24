@@ -344,7 +344,14 @@ void EkfMultiObjectTracking::UpdateTrack(mc_mot::TrackStruct &track, const mc_mo
     Eigen::Matrix8_8d I = Eigen::Matrix8_8d::Identity();
     track.state_cov = (I - K * H_) * track.state_cov;
 
-    if (measurement.has_velocity && config_.detection_velocity_fusion_mode >= 2) {
+    const double track_age_sec = std::max(
+        0.0, measurement.state.time_stamp - track.initialization_time);
+    const bool use_detector_velocity_update =
+        config_.detection_velocity_fusion_mode == 2 ||
+        (config_.detection_velocity_fusion_mode == 3 &&
+         track_age_sec <=
+             config_.detection_velocity_update_max_track_age_sec);
+    if (measurement.has_velocity && use_detector_velocity_update) {
         FuseVelocity(
             track,
             measurement.state.v_x,
@@ -568,6 +575,7 @@ void EkfMultiObjectTracking::UpdateCenterMotionVelocity(
 
 void EkfMultiObjectTracking::InitTrack(mc_mot::TrackStruct &track, const mc_mot::Meastruct &measurement) {
     track.track_id = cur_track_id_;
+    track.initialization_time = measurement.state.time_stamp;
     track.update_time = measurement.state.time_stamp;
     track.detection_confidence = measurement.detection_confidence;
 

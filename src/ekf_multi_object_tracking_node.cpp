@@ -355,6 +355,10 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
         "configure/detection_velocity_noise_std_mps",
         config_.detection_velocity_noise_std_mps,
         1.0);
+    nh.param<double>(
+        "configure/detection_velocity_update_max_track_age_sec",
+        config_.detection_velocity_update_max_track_age_sec,
+        1.0);
     nh.param<bool>(
         "configure/center_motion_velocity_fusion",
         config_.center_motion_velocity_fusion,

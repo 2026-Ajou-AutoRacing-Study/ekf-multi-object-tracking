@@ -100,6 +100,27 @@ TEST(DetectionVelocityFusion, EveryUpdateCorrectsVelocityState) {
   EXPECT_NEAR(fused_velocity, 5.0, 0.05);
 }
 
+TEST(DetectionVelocityFusion, EarlyWindowStopsCorrectingMatureTrack) {
+  MultiClassObjectTrackingConfig config;
+  config.detection_velocity_fusion_mode = 3;
+  config.detection_velocity_noise_std_mps = 0.1;
+  config.detection_velocity_update_max_track_age_sec = 1.0;
+  auto tracker = std::make_unique<EkfMultiObjectTracking>(config);
+
+  Update(*tracker, Measurement(1.0, 0.0, 0.0, true, 5.0, 0.0));
+  tracker->RunPrediction(0.5);
+  Update(*tracker, Measurement(1.5, 2.5, 0.0, true, 7.0, 0.0));
+  const double early_velocity =
+      InitializedTrack(tracker->GetTrackResults()).state_vec(S_VX);
+  EXPECT_GT(early_velocity, 5.0);
+
+  tracker->RunPrediction(1.0);
+  Update(*tracker, Measurement(2.5, 7.5, 0.0, true, 20.0, 0.0));
+  const double mature_velocity =
+      InitializedTrack(tracker->GetTrackResults()).state_vec(S_VX);
+  EXPECT_LT(mature_velocity, 15.0);
+}
+
 TEST(CenterMotionVelocityFusion, WaitsForMinimumCausalBaseline) {
   MultiClassObjectTrackingConfig off_config;
   off_config.global_coord_track = true;
