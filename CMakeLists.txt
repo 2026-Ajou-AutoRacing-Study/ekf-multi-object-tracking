@@ -85,6 +85,10 @@ install(DIRECTORY config launch
 )
 
 if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(test_fixed_output_scheduler test/test_fixed_output_scheduler.cpp)
+  if(TARGET test_fixed_output_scheduler)
+    target_link_libraries(test_fixed_output_scheduler ${catkin_LIBRARIES})
+  endif()
   catkin_add_gtest(
     test_vehicle_orientation_canonicalizer
     test/test_vehicle_orientation_canonicalizer.cpp

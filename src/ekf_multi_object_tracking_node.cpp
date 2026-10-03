@@ -12,6 +12,7 @@
 /****************************************************************************/
 
 #include "ekf_multi_object_tracking_node.hpp"
+#include "fixed_output_scheduler.hpp"
 
 namespace {
 
@@ -218,21 +219,13 @@ void EkfMultiObjectTrackingNode::Run() {
 
         if (b_is_track_init_) {
             const double now_sec = ros::Time::now().toSec();
-            const double period_sec = 1.0 / config_.fixed_output_rate_hz;
-            if (next_fixed_output_time_sec_ <= 0.0 ||
-                now_sec + period_sec < next_fixed_output_time_sec_) {
-                next_fixed_output_time_sec_ = now_sec;
-            }
-            if (now_sec + 1.0e-9 >= next_fixed_output_time_sec_) {
-                fixed_output_target_sec = next_fixed_output_time_sec_;
-                // Skip missed slots instead of emitting a burst of duplicate
-                // messages after a slow callback or a rosbag clock jump.
-                const double periods_behind =
-                    std::floor((now_sec - next_fixed_output_time_sec_) / period_sec);
-                next_fixed_output_time_sec_ +=
-                    (std::max(0.0, periods_behind) + 1.0) * period_sec;
-                build_output = true;
-            }
+            // Keep the existing cadence and skip missed slots, but predict
+            // the output copy to actual now, never to a past nominal slot.
+            // Measurement state/header, TF lookup time, and age limit remain
+            // unchanged. Fast fresh detections must not cause output starvation.
+            build_output = tracking_output::claim_slot(
+                now_sec, config_.fixed_output_rate_hz,
+                next_fixed_output_time_sec_, fixed_output_target_sec);
         }
     }
 
@@ -242,8 +235,8 @@ void EkfMultiObjectTrackingNode::Run() {
         if (config_.fixed_output_rate_hz > 0.0) {
             const double output_age_sec =
                 fixed_output_target_sec - mot_track_structs.time_stamp;
-            if (output_age_sec < -1.0e-6 ||
-                output_age_sec > config_.maximum_fixed_output_prediction_age_sec) {
+            if (!tracking_output::valid_prediction_age(
+                    output_age_sec, config_.maximum_fixed_output_prediction_age_sec)) {
                 ROS_DEBUG_THROTTLE(
                     1.0,
                     "[EKF tracker] Skip fixed output with state age %.3f sec",
