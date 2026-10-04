@@ -327,6 +327,10 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
     nh.getParam("configure/output_local_coord", config_.output_local_coord);
     nh.getParam("configure/output_period_lidar", config_.output_period_lidar);
     nh.getParam("configure/output_confirmed_track", config_.output_confirmed_track);
+    nh.param<bool>("configure/fast_confirmed_vehicle_promotion",
+                   config_.fast_confirmed_vehicle_promotion, false);
+    nh.param<double>("configure/vehicle_promotion_min_confidence",
+                     config_.vehicle_promotion_min_confidence, 0.60);
     nh.getParam("configure/use_predefined_ref_point", config_.use_predefined_ref_point);
     nh.getParam("configure/reference_lat", config_.reference_lat);
     nh.getParam("configure/reference_lon", config_.reference_lon);

@@ -269,6 +269,12 @@ struct MultiClassObjectTrackingConfig {
     bool output_period_lidar{false};
     bool output_confirmed_track{false};
 
+    // Experimental asymmetric promotion: only an already confirmed UNKNOWN
+    // can adopt a high-confidence associated vehicle observation immediately.
+    // Track birth/confirmation and normal demotion smoothing are unchanged.
+    bool fast_confirmed_vehicle_promotion{false};
+    double vehicle_promotion_min_confidence{0.60};
+
     bool use_predefined_ref_point{false};
     double reference_lat{0.0};
     double reference_lon{0.0};

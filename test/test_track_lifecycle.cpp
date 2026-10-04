@@ -82,6 +82,50 @@ void ConfirmStationaryTrack(
 
 }  // namespace
 
+TEST(VehiclePromotion, ConfirmedUnknownAdoptsStrongCarWithoutChangingId) {
+  MultiClassObjectTrackingConfig config;
+  config.fast_confirmed_vehicle_promotion = true;
+  auto tracker = std::make_unique<EkfMultiObjectTracking>(config);
+  double timestamp = 0.0;
+  ConfirmStationaryTrack(*tracker, timestamp);
+  const int id = ConfirmedTrackId(*tracker);
+  auto measurement = Measurement(1.3, 0.0, 0.0, mc_mot::ObjectClass::CAR);
+  measurement.detection_confidence = 0.8;
+  PredictAndUpdate(*tracker, timestamp, 1.3, {measurement});
+  const auto tracks = InitializedTracks(*tracker);
+  ASSERT_EQ(tracks.size(), 1U);
+  EXPECT_EQ(tracks.front().track_id, id);
+  EXPECT_EQ(tracks.front().getRepClass(), mc_mot::ObjectClass::CAR);
+  EXPECT_NEAR(tracks.front().getRepClassProb(), 0.8, 1e-6);
+}
+
+TEST(VehiclePromotion, WeakCarAndDisabledPolicyKeepLegacySmoothing) {
+  for (const bool enabled : {false, true}) {
+    MultiClassObjectTrackingConfig config;
+    config.fast_confirmed_vehicle_promotion = enabled;
+    auto tracker = std::make_unique<EkfMultiObjectTracking>(config);
+    double timestamp = 0.0;
+    ConfirmStationaryTrack(*tracker, timestamp);
+    auto measurement = Measurement(1.3, 0.0, 0.0, mc_mot::ObjectClass::CAR);
+    measurement.detection_confidence = enabled ? 0.59 : 0.8;
+    PredictAndUpdate(*tracker, timestamp, 1.3, {measurement});
+    EXPECT_EQ(InitializedTracks(*tracker).front().getRepClass(), mc_mot::ObjectClass::UNKNOWN);
+  }
+}
+
+TEST(VehiclePromotion, TentativeTrackStillRequiresOriginalConfirmation) {
+  MultiClassObjectTrackingConfig config;
+  config.fast_confirmed_vehicle_promotion = true;
+  auto tracker = std::make_unique<EkfMultiObjectTracking>(config);
+  double timestamp = 1.0;
+  Update(*tracker, timestamp, {Measurement(timestamp, 0.0, 0.0)});
+  PredictAndUpdate(*tracker, timestamp, 1.1,
+      {Measurement(1.1, 0.0, 0.0, mc_mot::ObjectClass::CAR)});
+  ASSERT_EQ(InitializedTracks(*tracker).size(), 1U);
+  EXPECT_FALSE(InitializedTracks(*tracker).front().is_confirmed);
+  EXPECT_EQ(InitializedTracks(*tracker).front().getRepClass(), mc_mot::ObjectClass::UNKNOWN);
+}
+
 TEST(TrackLifecycle, ConfirmedStationaryTrackSurvivesBoundedGapAndReusesId) {
   MultiClassObjectTrackingConfig config;
   config.time_aware_track_lifecycle = true;

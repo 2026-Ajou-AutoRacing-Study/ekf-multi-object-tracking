@@ -417,7 +417,23 @@ void EkfMultiObjectTracking::UpdateTrack(mc_mot::TrackStruct &track, const mc_mo
                      (1.0 - config_.dimension_filter_alpha) * track.object_z;
 
     // Class Filtering
-    track.updateClassScore(mc_mot::ObjectClass(measurement.classification));
+    const bool promote_vehicle = config_.fast_confirmed_vehicle_promotion &&
+        track.is_confirmed && track.getRepClass() == mc_mot::ObjectClass::UNKNOWN &&
+        (measurement.classification == mc_mot::ObjectClass::CAR ||
+         measurement.classification == mc_mot::ObjectClass::TRUCK) &&
+        std::isfinite(measurement.detection_confidence) &&
+        measurement.detection_confidence >= config_.vehicle_promotion_min_confidence;
+    if (promote_vehicle) {
+        // Scores remain a heuristic, not calibrated existence probabilities.
+        // Preserve uncertainty instead of forcing the vehicle score to 1.0.
+        const double probability = std::max(0.51, std::min(1.0,
+            static_cast<double>(measurement.detection_confidence)));
+        std::fill(track.class_score_arr, track.class_score_arr + CLASS_NUM, 0.0);
+        track.class_score_arr[mc_mot::ObjectClass::UNKNOWN] = 1.0 - probability;
+        track.class_score_arr[measurement.classification] = probability;
+    } else {
+        track.updateClassScore(mc_mot::ObjectClass(measurement.classification));
+    }
 
     // Yaw rate Filtering based on Kinematic Model. Only available in global track mode
     if (config_.use_yaw_rate_filtering && config_.global_coord_track == true &&
