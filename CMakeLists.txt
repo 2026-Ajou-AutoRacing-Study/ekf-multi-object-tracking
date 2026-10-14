@@ -86,6 +86,14 @@ install(DIRECTORY config launch
 
 if(CATKIN_ENABLE_TESTING)
   catkin_add_gtest(
+    test_pedestrian_association_ranking
+    test/test_pedestrian_association_ranking.cpp
+    src/algorithm/ekf_multi_object_tracking.cpp
+  )
+  if(TARGET test_pedestrian_association_ranking)
+    target_link_libraries(test_pedestrian_association_ranking ${catkin_LIBRARIES})
+  endif()
+  catkin_add_gtest(
     test_vehicle_orientation_canonicalizer
     test/test_vehicle_orientation_canonicalizer.cpp
   )

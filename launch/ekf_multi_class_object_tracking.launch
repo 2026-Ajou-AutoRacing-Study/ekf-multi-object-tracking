@@ -1,5 +1,6 @@
 <launch>
   <arg name="fast_confirmed_vehicle_promotion" default="false"/>
+  <arg name="pedestrian_gaussian_association_ranking" default="false"/>
   <arg name="vehicle_promotion_min_confidence" default="0.60"/>
   <arg name="input_objects"
        default="/perception/object_recognition/detection/objects"/>
@@ -54,6 +55,8 @@
   <arg name="use_kinematic_model" default="false"/>
 
   <rosparam file="$(env AJOUNICE_ROOT)/base_ws/src/ekf-multi-object-tracking/config/config.yaml" command="load"/>
+  <param name="configure/pedestrian_gaussian_association_ranking"
+         value="$(arg pedestrian_gaussian_association_ranking)"/>
   <param name="configure/fast_confirmed_vehicle_promotion"
          value="$(arg fast_confirmed_vehicle_promotion)"/>
   <param name="configure/vehicle_promotion_min_confidence"

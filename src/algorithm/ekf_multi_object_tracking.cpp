@@ -36,6 +36,10 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
     }
     Eigen::MatrixXd cost_matrix(i_meas_num, MAX_TRACKS);
     cost_matrix.setConstant(std::numeric_limits<double>::max());
+    Eigen::MatrixXd ranking;
+    if (config_.pedestrian_gaussian_association_ranking) {
+        ranking = cost_matrix;
+    }
 
     // Initialize is_associated flag for all tracks
     for (auto &track : all_tracks_) {
@@ -63,12 +67,27 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
             }
 
             cost_matrix(meas_idx, track_idx) = maha_distance;
+            if (config_.pedestrian_gaussian_association_ranking) {
+                ranking(meas_idx, track_idx) = maha_distance;
+                if (measurements.meas[meas_idx].classification == mc_mot::ObjectClass::PEDESTRIAN &&
+                    all_tracks_[track_idx].is_init && maha_distance < config_.max_association_dist_m) {
+                    const auto &track = all_tracks_[track_idx];
+                    const auto &observation = measurements.meas[meas_idx];
+                    Eigen::Vector2d innovation;
+                    innovation << observation.state.x - track.state_vec(S_X),
+                                  observation.state.y - track.state_vec(S_Y);
+                    ranking(meas_idx, track_idx) = mc_mot::GaussianXYAssociationRank(
+                        innovation, track.state_cov.block<2, 2>(S_X, S_X),
+                        R_.block<2, 2>(0, 0), observation.detection_confidence, maha_distance);
+                }
+            }
         }
     }
 
     std::vector<int> assignment; // Initialized with i_meas_num. Stores associated track index for each element
     std::vector<int> assignment_track;
-    MatchPairs(cost_matrix, assignment, assignment_track);
+    MatchPairs(cost_matrix, assignment, assignment_track,
+               config_.pedestrian_gaussian_association_ranking ? &ranking : nullptr);
 
     int init_count = 0;
     int asso_count = 0;
@@ -689,7 +708,7 @@ void EkfMultiObjectTracking::InitTrack(mc_mot::TrackStruct &track, const mc_mot:
 }
 
 void EkfMultiObjectTracking::MatchPairs(const Eigen::MatrixXd &cost_matrix, std::vector<int> &row_indices,
-                                          std::vector<int> &col_indices) {
+                                          std::vector<int> &col_indices, const Eigen::MatrixXd *ranking) {
     // Initialize variables
     int num_rows = cost_matrix.rows(); // Meas num
     int num_cols = cost_matrix.cols(); // Track num
@@ -711,7 +730,7 @@ void EkfMultiObjectTracking::MatchPairs(const Eigen::MatrixXd &cost_matrix, std:
         for (int j = 0; j < num_cols; ++j) {
             // Add only those within the distance threshold to pairs
             if (cost_matrix(i, j) < config_.max_association_dist_m) {
-                pairs.push_back({i, j, cost_matrix(i, j)});
+                pairs.push_back({i, j, ranking ? (*ranking)(i, j) : cost_matrix(i, j)});
             }
         }
     }

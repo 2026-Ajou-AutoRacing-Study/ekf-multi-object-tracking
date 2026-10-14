@@ -66,6 +66,25 @@ using Matrix8_3d = Eigen::Matrix<double, 8, 3>;
 
 namespace mc_mot {
 
+// Ranking only: callers must admit edges with the legacy association gate.
+// Invalid covariance falls back to the original cost, never admitting an edge.
+inline double GaussianXYAssociationRank(
+    const Eigen::Vector2d& innovation, const Eigen::Matrix2d& prediction_covariance,
+    const Eigen::Matrix2d& measurement_covariance, const double confidence,
+    const double fallback_cost) {
+    Eigen::Matrix2d covariance = prediction_covariance +
+        (confidence < 0.5 ? 10.0 : 1.0) * measurement_covariance;
+    covariance = (0.5 * (covariance + covariance.transpose())).eval();
+    const double determinant = covariance.determinant();
+    if (!innovation.allFinite() || !covariance.allFinite() ||
+        determinant <= 1.e-12 || covariance(0, 0) <= 0.0 || covariance(1, 1) <= 0.0) {
+        return fallback_cost;
+    }
+    const double squared = innovation.dot(covariance.inverse() * innovation);
+    const double rank = 0.5 * (squared + std::log(determinant));
+    return std::isfinite(rank) ? rank : fallback_cost;
+}
+
 typedef enum { NONE = 0, ODOMETRY } LocalizationType;
 typedef enum { CV = 0, CTRV, CA, CTRA } PredictionModel;
 typedef enum { UNKNOWN = 0, CAR, TRUCK, PEDESTRIAN, BICYCLE} ObjectClass;
@@ -285,6 +304,9 @@ struct MultiClassObjectTrackingConfig {
     bool lidar_sync_scan_start{true};
 
     double max_association_dist_m{3.0};
+    // Generic core remains legacy unless the deployment explicitly enables it.
+    // Pedestrian rank changes neither allowed edges nor birth/coasting policy.
+    bool pedestrian_gaussian_association_ranking{false};
 
     // Frame-count-only deletion makes the effective lifetime depend on the
     // detector rate. Confirmed tracks instead coast for a bounded wall-time;
@@ -397,7 +419,8 @@ private:
         double velocity_y,
         double noise_std_mps);
 
-    void MatchPairs(const Eigen::MatrixXd &cost_matrix, std::vector<int> &row_indices, std::vector<int> &col_indices);
+    void MatchPairs(const Eigen::MatrixXd &cost_matrix, std::vector<int> &row_indices,
+                    std::vector<int> &col_indices, const Eigen::MatrixXd *ranking = nullptr);
     void UpdateTrackId();
     void UpdateMatrix();
     bool ShouldDeleteUnassociatedTrack(

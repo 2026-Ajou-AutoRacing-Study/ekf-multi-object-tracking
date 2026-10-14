@@ -22,6 +22,8 @@ configure:
   lidar_sync_scan_start: false  # false: Sync lidar time to scan end, true: Sync lidar time to scan start
 
   max_association_dist_m: 5.0 # Maximum association distance
+  # Rank only already-admitted pedestrian pairs; rollback does not change gates.
+  pedestrian_gaussian_association_ranking: false
   # Confirmed-track lifetime is wall-time based so a temporary detector miss
   # does not become harsher merely because LiDAR/detector Hz is high.
   time_aware_track_lifecycle: true
