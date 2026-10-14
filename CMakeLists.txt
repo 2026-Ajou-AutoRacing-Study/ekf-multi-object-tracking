@@ -85,6 +85,10 @@ install(DIRECTORY config launch
 )
 
 if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(test_detection_input_receipt test/test_detection_input_receipt.cpp)
+  if(TARGET test_detection_input_receipt)
+    target_link_libraries(test_detection_input_receipt ${catkin_LIBRARIES})
+  endif()
   catkin_add_gtest(
     test_pedestrian_association_ranking
     test/test_pedestrian_association_ranking.cpp

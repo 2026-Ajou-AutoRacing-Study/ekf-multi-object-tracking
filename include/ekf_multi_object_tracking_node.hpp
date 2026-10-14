@@ -65,6 +65,7 @@
 // Algorithm
 #include "algorithm/ekf_multi_object_tracking.hpp"
 #include "vehicle_orientation_canonicalizer.hpp"
+#include "detection_input_receipt.hpp"
 
 
 namespace ros_bridge {
@@ -194,6 +195,10 @@ private:
     void BuildTrackedObjects(const mc_mot::TrackStructs& track_structs, const std::string& frame_id);
     void ConvertTrackGlobalToLocal(mc_mot::TrackStructs& track_structs, mc_mot::ObjectState synced_lidar_state);
     bool IsVisualizeTrack(const mc_mot::TrackStruct& track);
+    void AcknowledgeDetectionSnapshot(std::uint64_t generation) {
+        std::lock_guard<std::mutex> lock(mutex_lidar_objects_);
+        detection_input_receipt_.Acknowledge(generation);
+    }
 
     // Util
     mc_mot::ObjectState GetSyncedLidarState(double object_time,
@@ -212,12 +217,13 @@ private:
             return;
         }
 
-        std::lock_guard<std::mutex> lock(mutex_lidar_objects_);
-        i_lidar_objects_.header.frame_id = world_frame_id_;
-        str_detection_frame_id_ = world_frame_id_;
-        i_lidar_objects_.header.seq = msg->header.seq;
-        i_lidar_objects_.header.stamp = ros_bridge::GetTimeStamp( msg->header.stamp);
-        i_lidar_objects_.object.clear();
+        // Build a complete candidate before touching the shared packet. A TF
+        // failure must not turn an older pending detection into an empty one.
+        ros_interface::DetectObjects3D converted;
+        converted.header.frame_id = world_frame_id_;
+        converted.header.seq = msg->header.seq;
+        converted.header.stamp = ros_bridge::GetTimeStamp(msg->header.stamp);
+        converted.object.reserve(msg->objects.size());
 
         unsigned int id = 0;
         for (const auto& object : msg->objects) {
@@ -237,13 +243,12 @@ private:
                     1.0, "[EKF tracker] Cannot transform %s to %s at %.6f: %s",
                     msg->header.frame_id.c_str(), world_frame_id_.c_str(),
                     msg->header.stamp.toSec(), exception.what());
-                i_lidar_objects_.object.clear();
                 return;
             }
 
             ros_interface::DetectObject3D detect_object;
             detect_object.id = id++;
-            detect_object.state.header.stamp = i_lidar_objects_.header.stamp;
+            detect_object.state.header.stamp = converted.header.stamp;
             detect_object.state.x = world_pose.pose.position.x;
             detect_object.state.y = world_pose.pose.position.y;
             detect_object.state.z = world_pose.pose.position.z;
@@ -319,12 +324,19 @@ private:
                 }
             }
 
-            i_lidar_objects_.object.push_back(detect_object);
+            converted.object.push_back(detect_object);
         }
 
-        ROS_DEBUG_STREAM("[EKF tracker] Received " << i_lidar_objects_.object.size()
+        ROS_DEBUG_STREAM("[EKF tracker] Received " << converted.object.size()
                          << " standardized detections");
-        b_is_new_lidar_objects_ = true;
+        std::lock_guard<std::mutex> lock(mutex_lidar_objects_);
+        if (!detection_input::IsNewerStamp(converted.header.stamp,
+                i_lidar_objects_.header.stamp, detection_input_receipt_.Generation() != 0)) {
+            ROS_WARN_THROTTLE(1.0, "[EKF tracker] Dropping non-increasing detection commit");
+            return;
+        }
+        i_lidar_objects_ = std::move(converted);
+        detection_input_receipt_.Commit();
     }
 
     inline void CallbackOdometry(const nav_msgs::Odometry::ConstPtr& msg) {
@@ -420,7 +432,6 @@ private:
 
     // I/O Msg
     ros_interface::DetectObjects3D i_lidar_objects_;
-    std::string str_detection_frame_id_ = "";
 
     jsk_recognition_msgs::BoundingBoxArray o_jsk_tracked_objects_;
     autoware_perception_msgs::TrackedObjects o_tracked_objects_;
@@ -430,7 +441,7 @@ private:
     visualization_msgs::Marker o_vis_ego_stl_;
 
     // Main variables
-    bool b_is_new_lidar_objects_;
+    detection_input::Receipt detection_input_receipt_;
     bool b_is_new_motion_input_;
     bool b_is_new_track_objects_;
 

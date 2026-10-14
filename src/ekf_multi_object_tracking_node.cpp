@@ -52,7 +52,6 @@ unique_identifier_msgs::UUID StableTrackUuid(const int track_id) {
 EkfMultiObjectTrackingNode::EkfMultiObjectTrackingNode(){
 
     // Data validation
-    b_is_new_lidar_objects_ = false;
     b_is_new_track_objects_ = false;
 
     b_is_new_motion_input_ = false;
@@ -127,10 +126,14 @@ void EkfMultiObjectTrackingNode::Run() {
     // ----- Input -----
     ros_interface::DetectObjects3D lidar_objects;
     bool has_new_lidar_objects = false;
+    std::uint64_t detection_snapshot_generation = 0;
     {
         std::lock_guard<std::mutex> lock(mutex_lidar_objects_);
-        has_new_lidar_objects = b_is_new_lidar_objects_;
-        if (has_new_lidar_objects) lidar_objects = i_lidar_objects_;
+        has_new_lidar_objects = detection_input_receipt_.HasPending();
+        if (has_new_lidar_objects) {
+            lidar_objects = i_lidar_objects_;
+            detection_snapshot_generation = detection_input_receipt_.Generation();
+        }
     }
 
     // Detector-synchronized mode has no work until the next measurement.
@@ -170,7 +173,7 @@ void EkfMultiObjectTrackingNode::Run() {
             double dt = lidar_objects.header.stamp - last_predicted_time_;
             if (dt <= 0.0) {
                 ROS_WARN_THROTTLE(1.0, "[EKF tracker] Non-increasing detection stamp; dropping frame");
-                b_is_new_lidar_objects_ = false;
+                AcknowledgeDetectionSnapshot(detection_snapshot_generation);
                 return;
             }
             mcot_algorithm_.RunPrediction(dt);
@@ -197,7 +200,7 @@ void EkfMultiObjectTrackingNode::Run() {
         // Run measurment update in algorithm
         mcot_algorithm_.RunUpdate(meas_structs);
 
-        b_is_new_lidar_objects_ = false;
+        AcknowledgeDetectionSnapshot(detection_snapshot_generation);
         b_is_new_track_objects_ = true;
 
         if(b_is_track_init_ == false){
@@ -845,7 +848,7 @@ void EkfMultiObjectTrackingNode::VisualizeTrackObjects(const mc_mot::TrackStruct
 
     if (config_.visualize_mesh == true) {
         // Visualize EGO STL
-        o_vis_ego_stl_.header.frame_id = str_detection_frame_id_;
+        o_vis_ego_stl_.header.frame_id = world_frame_id_;
         o_vis_ego_stl_.ns = "ego_stl";
         o_vis_ego_stl_.id = 0;
         o_vis_ego_stl_.type = visualization_msgs::Marker::MESH_RESOURCE;
