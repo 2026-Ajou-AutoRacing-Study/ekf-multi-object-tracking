@@ -34,6 +34,8 @@
   <arg name="publish_center_motion_diagnostics" default="false"/>
   <arg name="publish_association_diagnostics" default="false"/>
   <arg name="diagnostics_auto_on_subscribe" default="true"/>
+  <arg name="shape_consistent_association_ranking" default="false"/>
+  <arg name="guard_inconsistent_class_transitions" default="false"/>
   <arg name="association_diagnostics_topic"
        default="/perception/object_recognition/tracking/diagnostics/association"/>
   <arg name="center_motion_active_objects"
@@ -120,6 +122,10 @@
   <param name="configure/center_motion_mature_noise_std_mps"
          value="$(arg center_motion_mature_noise_std_mps)"/>
   <param name="configure/prediction_model" value="$(arg prediction_model)"/>
+  <param name="configure/shape_consistent_association_ranking"
+         value="$(arg shape_consistent_association_ranking)"/>
+  <param name="configure/guard_inconsistent_class_transitions"
+         value="$(arg guard_inconsistent_class_transitions)"/>
   <param name="configure/system_noise_std_vx_vy_ms"
          value="$(arg system_noise_std_vx_vy_ms)"/>
   <param name="configure/meas_noise_std_xy_m"

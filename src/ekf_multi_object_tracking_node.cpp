@@ -367,6 +367,10 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
     nh.getParam("configure/max_association_dist_m", config_.max_association_dist_m);
     nh.param<bool>("configure/pedestrian_gaussian_association_ranking",
                    config_.pedestrian_gaussian_association_ranking, false);
+    nh.param<bool>("configure/shape_consistent_association_ranking",
+                   config_.shape_consistent_association_ranking, false);
+    nh.param<bool>("configure/guard_inconsistent_class_transitions",
+                   config_.class_transition_guard_config.enabled, false);
     nh.param<bool>(
         "configure/time_aware_track_lifecycle",
         config_.time_aware_track_lifecycle,
@@ -536,7 +540,9 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
         << " duplicate_birth_distance="
         << config_.duplicate_birth_suppression_distance_m
         << " pedestrian_gaussian_rank="
-        << config_.pedestrian_gaussian_association_ranking);
+        << config_.pedestrian_gaussian_association_ranking
+        << " shape_consistent_rank=" << config_.shape_consistent_association_ranking
+        << " class_shape_confirmation=" << config_.class_transition_guard_config.enabled);
 
     // Vehicle origin parameters
     int i_vehicle_origin;

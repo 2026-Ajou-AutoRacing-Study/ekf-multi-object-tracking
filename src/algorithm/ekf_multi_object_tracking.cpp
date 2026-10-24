@@ -15,6 +15,47 @@
 
 constexpr std::size_t mc_mot::AssociationDiagnostics::kMaximumRows;
 
+namespace {
+double DimensionRatio(const mc_mot::ObjectDimension& a,
+                      const mc_mot::ObjectDimension& b) {
+    if (!std::isfinite(a.length) || !std::isfinite(a.width) ||
+        !std::isfinite(b.length) || !std::isfinite(b.width) ||
+        std::min({a.length, a.width, b.length, b.width}) < 0.25) {
+        return std::numeric_limits<double>::infinity();
+    }
+    return std::max({a.length / b.length, b.length / a.length,
+                     a.width / b.width, b.width / a.width});
+}
+
+bool InsideFootprint(double x, double y, const mc_mot::TrackStruct& track) {
+    const double dx = x - track.state_vec(S_X);
+    const double dy = y - track.state_vec(S_Y);
+    const double c = std::cos(track.state_vec(S_YAW));
+    const double s = std::sin(track.state_vec(S_YAW));
+    // A small numerical allowance, not a wider global birth/association gate.
+    return std::abs(c * dx + s * dy) <= track.dimension.length * 0.5 + 0.10 &&
+           std::abs(-s * dx + c * dy) <= track.dimension.width * 0.5 + 0.10;
+}
+
+bool IsShapeConflictingCompetitor(const mc_mot::Meastruct& observation,
+                                 const mc_mot::TrackStruct& tentative,
+                                 const mc_mot::TrackStruct& mature) {
+    if (!tentative.is_init || tentative.is_confirmed ||
+        !mature.is_init || !mature.is_confirmed ||
+        observation.classification == mc_mot::PEDESTRIAN ||
+        tentative.getRepClass() == mc_mot::PEDESTRIAN ||
+        mature.getRepClass() == mc_mot::PEDESTRIAN) return false;
+    const double tentative_ratio = DimensionRatio(observation.dimension, tentative.dimension);
+    const double mature_ratio = DimensionRatio(observation.dimension, mature.dimension);
+    if (!std::isfinite(tentative_ratio) || !std::isfinite(mature_ratio) ||
+        tentative_ratio < 1.50 || mature_ratio > 1.35) return false;
+    if (std::abs(std::cos(tentative.state_vec(S_YAW) - mature.state_vec(S_YAW))) < 0.70710678 ||
+        std::abs(std::cos(observation.state.yaw - mature.state_vec(S_YAW))) < 0.70710678) return false;
+    return InsideFootprint(tentative.state_vec(S_X), tentative.state_vec(S_Y), mature) &&
+           InsideFootprint(observation.state.x, observation.state.y, mature);
+}
+}  // namespace
+
 /*
     Predict all track in same dt_sec
 */
@@ -49,7 +90,9 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
     Eigen::MatrixXd cost_matrix(i_meas_num, MAX_TRACKS);
     cost_matrix.setConstant(std::numeric_limits<double>::max());
     Eigen::MatrixXd ranking;
-    if (config_.pedestrian_gaussian_association_ranking) {
+    const bool use_ranking = config_.pedestrian_gaussian_association_ranking ||
+        config_.shape_consistent_association_ranking;
+    if (use_ranking) {
         ranking = cost_matrix;
     }
 
@@ -94,9 +137,10 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
             }
 
             cost_matrix(meas_idx, track_idx) = maha_distance;
-            if (config_.pedestrian_gaussian_association_ranking) {
+            if (use_ranking) {
                 ranking(meas_idx, track_idx) = maha_distance;
-                if (measurements.meas[meas_idx].classification == mc_mot::ObjectClass::PEDESTRIAN &&
+                if (config_.pedestrian_gaussian_association_ranking &&
+                    measurements.meas[meas_idx].classification == mc_mot::ObjectClass::PEDESTRIAN &&
                     all_tracks_[track_idx].is_init && maha_distance < config_.max_association_dist_m) {
                     const auto &track = all_tracks_[track_idx];
                     const auto &observation = measurements.meas[meas_idx];
@@ -109,7 +153,38 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
                 }
             }
             if (association_diagnostics_enabled_ && nearest_candidates[meas_idx].track_id == track_idx) {
-                nearest_candidates[meas_idx].ranking_cost = config_.pedestrian_gaussian_association_ranking ? ranking(meas_idx, track_idx) : maha_distance;
+                nearest_candidates[meas_idx].ranking_cost = use_ranking ? ranking(meas_idx, track_idx) : maha_distance;
+            }
+        }
+    }
+
+    if (config_.shape_consistent_association_ranking) {
+        // Do not remove an admitted edge, suppress a birth, or always prefer
+        // old IDs. Only delay a tentative competitor behind an eligible,
+        // shape-consistent explanation of the same occupied footprint.
+        std::vector<int> mature_indices;
+        for (int t = 0; t < MAX_TRACKS; ++t) {
+            if (all_tracks_[t].is_init && all_tracks_[t].is_confirmed)
+                mature_indices.push_back(t);
+        }
+        for (int m = 0; m < i_meas_num; ++m) {
+            for (int t = 0; t < MAX_TRACKS; ++t) {
+                if (!(cost_matrix(m, t) < config_.max_association_dist_m) ||
+                    !all_tracks_[t].is_init || all_tracks_[t].is_confirmed) continue;
+                double preferred_rank = std::numeric_limits<double>::infinity();
+                for (const int stable : mature_indices) {
+                    if (cost_matrix(m, stable) < config_.max_association_dist_m &&
+                        IsShapeConflictingCompetitor(measurements.meas[m],
+                            all_tracks_[t], all_tracks_[stable])) {
+                        preferred_rank = std::min(preferred_rank, ranking(m, stable));
+                    }
+                }
+                if (std::isfinite(preferred_rank)) {
+                    ranking(m, t) = std::max(ranking(m, t), preferred_rank + 1.e-6);
+                }
+            }
+            if (association_diagnostics_enabled_ && nearest_candidates[m].track_id >= 0) {
+                nearest_candidates[m].ranking_cost = ranking(m, nearest_candidates[m].track_id);
             }
         }
     }
@@ -117,7 +192,7 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
     std::vector<int> assignment; // Initialized with i_meas_num. Stores associated track index for each element
     std::vector<int> assignment_track;
     MatchPairs(cost_matrix, assignment, assignment_track,
-               config_.pedestrian_gaussian_association_ranking ? &ranking : nullptr);
+               use_ranking ? &ranking : nullptr);
 
     int init_count = 0;
     int asso_count = 0;
@@ -144,10 +219,13 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
                 all_tracks_[track_idx].is_confirmed = true;
             }
             if (association_diagnostics_enabled_) {
-                auto row = AssociationSnapshot("matched", !was_confirmed && all_tracks_[track_idx].is_confirmed ? "confirmed" : "update", all_tracks_[track_idx], meas_idx, &measurements.meas[meas_idx]);
+                const char* reason = !was_confirmed && all_tracks_[track_idx].is_confirmed
+                    ? "confirmed" : (all_tracks_[track_idx].class_transition_state.phase ==
+                        class_transition_guard::Phase::Pending ? "class_shape_pending" : "update");
+                auto row = AssociationSnapshot("matched", reason, all_tracks_[track_idx], meas_idx, &measurements.meas[meas_idx]);
                 row.distance_m = diagnostic_distance;
                 row.association_cost = cost_matrix(meas_idx, track_idx);
-                row.ranking_cost = config_.pedestrian_gaussian_association_ranking ? ranking(meas_idx, track_idx) : cost_matrix(meas_idx, track_idx);
+                row.ranking_cost = use_ranking ? ranking(meas_idx, track_idx) : cost_matrix(meas_idx, track_idx);
                 row.prior_measurement_age_sec = diagnostic_prior_age;
                 row.track_assigned_measurement_index = meas_idx;
                 AppendAssociationDiagnostic(row);
@@ -203,6 +281,7 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
     int i_deleted_num = 0;
     for (auto &track : all_tracks_) {
         if (track.is_associated == false) {
+            track.class_transition_state.Reset();
             track.age++;
             track.updateDetectionCount(false);
 
@@ -397,6 +476,13 @@ void EkfMultiObjectTracking::PredictTrack(mc_mot::TrackStruct &track, double dt)
 }
 
 void EkfMultiObjectTracking::UpdateTrack(mc_mot::TrackStruct &track, const mc_mot::Meastruct &measurement) {
+    const auto class_decision = class_transition_guard::Evaluate(
+        config_.class_transition_guard_config, track.class_transition_state,
+        track.is_confirmed, track.getRepClass(),
+        {{track.dimension.length, track.dimension.width, track.dimension.height}},
+        measurement.classification,
+        {{measurement.dimension.length, measurement.dimension.width, measurement.dimension.height}},
+        measurement.state.time_stamp);
     Eigen::Vector3d measurement_vec;
     measurement_vec << measurement.state.x, measurement.state.y, measurement.state.yaw;
 
@@ -499,19 +585,23 @@ void EkfMultiObjectTracking::UpdateTrack(mc_mot::TrackStruct &track, const mc_mo
                                  (1.0 - config_.dimension_filter_alpha) * track.detection_confidence;
     track.age++;
 
-    // Dimension Alpha filtering
-    track.dimension.length = config_.dimension_filter_alpha * measurement.dimension.length +
+    // A pending cross-family shape discontinuity does not change the ordinary
+    // position/velocity update. Only dimensions and class evidence are deferred.
+    if (!class_decision.hold_shape) {
+      track.dimension.length = config_.dimension_filter_alpha * measurement.dimension.length +
                              (1.0 - config_.dimension_filter_alpha) * track.dimension.length;
     track.dimension.width = config_.dimension_filter_alpha * measurement.dimension.width +
                             (1.0 - config_.dimension_filter_alpha) * track.dimension.width;
     track.dimension.height = config_.dimension_filter_alpha * measurement.dimension.height +
                              (1.0 - config_.dimension_filter_alpha) * track.dimension.height;
+    }
 
     track.object_z = config_.dimension_filter_alpha * measurement.state.z +
                      (1.0 - config_.dimension_filter_alpha) * track.object_z;
 
     // Class Filtering
-    const bool promote_vehicle = config_.fast_confirmed_vehicle_promotion &&
+    const bool promote_vehicle = class_decision.vote_count > 0 &&
+        config_.fast_confirmed_vehicle_promotion &&
         track.is_confirmed && track.getRepClass() == mc_mot::ObjectClass::UNKNOWN &&
         (measurement.classification == mc_mot::ObjectClass::CAR ||
          measurement.classification == mc_mot::ObjectClass::TRUCK) &&
@@ -526,7 +616,9 @@ void EkfMultiObjectTracking::UpdateTrack(mc_mot::TrackStruct &track, const mc_mo
         track.class_score_arr[mc_mot::ObjectClass::UNKNOWN] = 1.0 - probability;
         track.class_score_arr[measurement.classification] = probability;
     } else {
-        track.updateClassScore(mc_mot::ObjectClass(measurement.classification));
+        for (std::size_t vote = 0; vote < class_decision.vote_count; ++vote) {
+            track.updateClassScore(class_decision.class_votes[vote]);
+        }
     }
 
     // Yaw rate Filtering based on Kinematic Model. Only available in global track mode

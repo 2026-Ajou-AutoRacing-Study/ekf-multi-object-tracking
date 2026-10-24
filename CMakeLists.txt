@@ -85,6 +85,17 @@ install(DIRECTORY config launch
 )
 
 if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(test_class_transition_guard test/test_class_transition_guard.cpp)
+  if(TARGET test_class_transition_guard)
+    target_link_libraries(test_class_transition_guard ${catkin_LIBRARIES})
+  endif()
+  foreach(consistency_test test_class_transition_integration test_shape_consistent_association)
+    catkin_add_gtest(${consistency_test}
+      test/${consistency_test}.cpp src/algorithm/ekf_multi_object_tracking.cpp)
+    if(TARGET ${consistency_test})
+      target_link_libraries(${consistency_test} ${catkin_LIBRARIES})
+    endif()
+  endforeach()
   catkin_add_gtest(
     test_association_diagnostics
     test/test_association_diagnostics.cpp

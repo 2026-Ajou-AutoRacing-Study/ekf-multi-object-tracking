@@ -30,6 +30,7 @@
 #include <utility>
 #include <vector>
 #include <ros/ros.h>
+#include "class_transition_guard.hpp"
 
 #define MAX_TRACKS 500
 #define MAX_HISTORY 7
@@ -138,8 +139,11 @@ struct TrackStruct {
     double direction_score{1.0}; // 1.0 High, -1 Low
     Eigen::Vector8d state_vec;   // X Y YAW VX VY YAWRATE AX AY
     Eigen::Matrix8_8d state_cov;
-    ObjectClass classification;
+    // Even inactive slots are copied by GetTrackResults(). Keep their enum
+    // initialized; the representative class still comes from class_score_arr.
+    ObjectClass classification{ObjectClass::UNKNOWN};
     ObjectDimension dimension;
+    class_transition_guard::State class_transition_state;
     double object_z{0.0};
     std::deque<CenterObservation> center_history;
     double last_center_motion_fusion_time{0.0};
@@ -253,6 +257,7 @@ struct TrackStruct {
         is_associated = false;
         std::fill(std::begin(detection_arr), std::end(detection_arr), false);
         center_history.clear();
+        class_transition_state.Reset();
         last_center_motion_fusion_time = 0.0;
         has_center_motion_velocity = false;
         center_motion_velocity_x = 0.0;
@@ -345,6 +350,10 @@ struct MultiClassObjectTrackingConfig {
     // Generic core remains legacy unless the deployment explicitly enables it.
     // Pedestrian rank changes neither allowed edges nor birth/coasting policy.
     bool pedestrian_gaussian_association_ranking{false};
+    // Prefer a shape-consistent mature explanation only when a tentative
+    // competitor occupies its footprint with a markedly inconsistent size.
+    bool shape_consistent_association_ranking{false};
+    class_transition_guard::Config class_transition_guard_config;
 
     // Frame-count-only deletion makes the effective lifetime depend on the
     // detector rate. Confirmed tracks instead coast for a bounded wall-time;
