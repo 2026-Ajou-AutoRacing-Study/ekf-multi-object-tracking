@@ -6,6 +6,27 @@
 #include <sstream>
 
 #include "association_diagnostic_json.hpp"
+#include "diagnostic_subscription_gate.hpp"
+
+TEST(AssociationDiagnosticSubscription, DefaultAutoAdvertisesWithoutCollecting) {
+    EXPECT_TRUE(tracking_diagnostics::ShouldAdvertise(false, true));
+    EXPECT_FALSE(tracking_diagnostics::ShouldCollect(false, true, 0));
+    EXPECT_TRUE(tracking_diagnostics::ShouldCollect(false, true, 1));
+    EXPECT_FALSE(tracking_diagnostics::ShouldCollect(false, true, 0));
+}
+
+TEST(AssociationDiagnosticSubscription, ExplicitDisablePreservesFullOff) {
+    EXPECT_FALSE(tracking_diagnostics::ShouldAdvertise(false, false));
+    EXPECT_FALSE(tracking_diagnostics::ShouldCollect(false, false, 0));
+    EXPECT_FALSE(tracking_diagnostics::ShouldCollect(false, false, 5));
+}
+
+TEST(AssociationDiagnosticSubscription, LegacyExplicitEnableRequiresSubscriber) {
+    EXPECT_TRUE(tracking_diagnostics::ShouldAdvertise(true, false));
+    EXPECT_FALSE(tracking_diagnostics::ShouldCollect(true, false, 0));
+    EXPECT_TRUE(tracking_diagnostics::ShouldCollect(true, false, 1));
+    EXPECT_TRUE(tracking_diagnostics::ShouldCollect(true, true, 2));
+}
 
 namespace {
 mc_mot::Meastruct Measurement(double time, double x, double y,

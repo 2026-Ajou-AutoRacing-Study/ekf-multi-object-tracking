@@ -469,6 +469,7 @@ private:
     MultiClassObjectTrackingConfig config_;
     bool publish_center_motion_diagnostics_{false};
     bool publish_association_diagnostics_{false};
+    bool diagnostics_auto_on_subscribe_{true};
 
     std::string cfg_lidar_objects_topic_ = "";
     std::string cfg_odometry_topic_ = "";
