@@ -49,6 +49,7 @@
 #include "geometry_msgs/TwistStamped.h"
 
 #include <std_msgs/Float32MultiArray.h>
+#include <std_msgs/String.h>
 #include <tf/LinearMath/Quaternion.h> // tf::quaternion
 #include <tf/tf.h>
 #include <tf/transform_broadcaster.h>
@@ -418,6 +419,7 @@ private:
     ros::Publisher p_track_objects_;
     ros::Publisher p_center_motion_active_objects_;
     ros::Publisher p_center_motion_inactive_objects_;
+    ros::Publisher p_association_diagnostics_;
 
     ros::Publisher p_all_track_;
     ros::Publisher p_all_track_info_;
@@ -466,6 +468,7 @@ private:
     // Config
     MultiClassObjectTrackingConfig config_;
     bool publish_center_motion_diagnostics_{false};
+    bool publish_association_diagnostics_{false};
 
     std::string cfg_lidar_objects_topic_ = "";
     std::string cfg_odometry_topic_ = "";

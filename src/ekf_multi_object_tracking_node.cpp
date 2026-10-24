@@ -12,6 +12,7 @@
 /****************************************************************************/
 
 #include "ekf_multi_object_tracking_node.hpp"
+#include "association_diagnostic_json.hpp"
 
 namespace {
 
@@ -92,6 +93,7 @@ void EkfMultiObjectTrackingNode::Init() {
 
     private_nh.param<std::string>("world_frame_id", world_frame_id_, "map");
     private_nh.param<double>("transform_timeout_sec", transform_timeout_sec_, 0.1);
+    private_nh.param<bool>("publish_association_diagnostics", publish_association_diagnostics_, false);
 
     // Standard object pipeline I/O.  Global names are selected by launch remaps.
     s_lidar_objects_ = private_nh.subscribe(
@@ -110,6 +112,9 @@ void EkfMultiObjectTrackingNode::Init() {
     p_center_motion_inactive_objects_ =
         private_nh.advertise<autoware_perception_msgs::TrackedObjects>(
             "diagnostics/center_motion_inactive_objects", 10);
+    if (publish_association_diagnostics_) {
+        p_association_diagnostics_ = private_nh.advertise<std_msgs::String>("diagnostics/association", 2);
+    }
     // JSK and markers remain visualization-only compatibility outputs.
     p_all_track_ = nh.advertise<jsk_recognition_msgs::BoundingBoxArray>(cfg_output_track_jsk_topic_, 10);
     p_all_track_info_ = nh.advertise<visualization_msgs::MarkerArray>(cfg_output_track_marker_topic_, 10);
@@ -198,7 +203,21 @@ void EkfMultiObjectTrackingNode::Run() {
         }
 
         // Run measurment update in algorithm
+        const bool trace_association = publish_association_diagnostics_ &&
+            p_association_diagnostics_.getNumSubscribers() > 0;
+        mcot_algorithm_.SetAssociationDiagnosticsEnabled(trace_association);
         mcot_algorithm_.RunUpdate(meas_structs);
+        if (trace_association) {
+            try {
+                std_msgs::String diagnostic;
+                diagnostic.data = tracking_diagnostics::ToJson(
+                    mcot_algorithm_.GetAssociationDiagnostics(), detection_snapshot_generation,
+                    lidar_objects.header.seq, world_frame_id_, ros::Time::now().toSec());
+                p_association_diagnostics_.publish(diagnostic);
+            } catch (const std::exception& exception) {
+                ROS_WARN_THROTTLE(1.0, "[EKF tracker] Association diagnostic publication failed: %s", exception.what());
+            }
+        }
 
         AcknowledgeDetectionSnapshot(detection_snapshot_generation);
         b_is_new_track_objects_ = true;

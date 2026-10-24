@@ -18,12 +18,14 @@
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <algorithm>
+#include <array>
 #include <cfloat>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <deque>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -279,6 +281,42 @@ struct Meastructs {
     double time_stamp{0.0};
     std::vector<Meastruct> meas;
 };
+
+// Diagnostic snapshots only. They never participate in matching/lifecycle.
+// One chosen/nearest-candidate row per measurement, not an NxM matrix dump.
+struct AssociationDiagnosticRow {
+    const char* event{""};
+    const char* reason{""};
+    int measurement_index{-1};
+    int track_id{-1};
+    int track_assigned_measurement_index{-1};
+    int measurement_class{-1};
+    int track_class{-1};
+    double distance_m{std::numeric_limits<double>::quiet_NaN()};
+    double association_cost{std::numeric_limits<double>::quiet_NaN()};
+    double ranking_cost{std::numeric_limits<double>::quiet_NaN()};
+    double prior_measurement_age_sec{std::numeric_limits<double>::quiet_NaN()};
+    double last_measurement_time{0.0};
+    double initialization_time{0.0};
+    double score{0.0};
+    double measurement_score{0.0};
+    bool confirmed{false};
+    bool associated{false};
+    int detection_count{0};
+    std::array<double, 3> center{{0., 0., 0.}};
+    std::array<double, 3> dimensions{{0., 0., 0.}};
+    std::array<double, 2> velocity{{0., 0.}};
+    std::array<double, CLASS_NUM> class_votes{{0., 0., 0., 0., 0.}};
+};
+
+struct AssociationDiagnostics {
+    static constexpr std::size_t kMaximumRows = 256;
+    double measurement_stamp{0.0};
+    std::size_t input_count{0};
+    std::size_t processed_count{0};
+    std::size_t omitted_rows{0};
+    std::vector<AssociationDiagnosticRow> rows;
+};
 } // namespace mc_mot
 
 struct MultiClassObjectTrackingConfig {
@@ -404,6 +442,13 @@ public:
     mc_mot::TrackStructs GetPredictedTrackResults(double target_timestamp);
 
     void UpdateConfig(const MultiClassObjectTrackingConfig config);
+    void SetAssociationDiagnosticsEnabled(bool enabled) {
+        association_diagnostics_enabled_ = enabled;
+        if (!enabled) association_diagnostics_.rows.clear();
+    }
+    const mc_mot::AssociationDiagnostics& GetAssociationDiagnostics() const {
+        return association_diagnostics_;
+    }
 
 private:
     // Private functions
@@ -427,10 +472,15 @@ private:
         const mc_mot::TrackStruct &track,
         double measurement_time) const;
     bool ShouldSuppressDuplicateTrackBirth(
-        const mc_mot::Meastruct &measurement) const;
+        const mc_mot::Meastruct &measurement,
+        int* blocking_track_id = nullptr) const;
     bool AreLifecycleClassesCompatible(
         mc_mot::ObjectClass measurement_class,
         mc_mot::ObjectClass track_class) const;
+    mc_mot::AssociationDiagnosticRow AssociationSnapshot(
+        const char* event, const char* reason, const mc_mot::TrackStruct& track,
+        int measurement_index = -1, const mc_mot::Meastruct* measurement = nullptr) const;
+    void AppendAssociationDiagnostic(const mc_mot::AssociationDiagnosticRow& row);
 
 private:
     // Utils
@@ -454,6 +504,8 @@ private:
 
     // config
     MultiClassObjectTrackingConfig config_;
+    bool association_diagnostics_enabled_{false};
+    mc_mot::AssociationDiagnostics association_diagnostics_;
 };
 
 #endif // __EKF_MULTI_OBJECT_TRACKING_HPP__

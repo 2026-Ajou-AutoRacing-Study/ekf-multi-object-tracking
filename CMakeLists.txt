@@ -85,6 +85,14 @@ install(DIRECTORY config launch
 )
 
 if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(
+    test_association_diagnostics
+    test/test_association_diagnostics.cpp
+    src/algorithm/ekf_multi_object_tracking.cpp
+  )
+  if(TARGET test_association_diagnostics)
+    target_link_libraries(test_association_diagnostics ${catkin_LIBRARIES})
+  endif()
   catkin_add_gtest(test_detection_input_receipt test/test_detection_input_receipt.cpp)
   if(TARGET test_detection_input_receipt)
     target_link_libraries(test_detection_input_receipt ${catkin_LIBRARIES})

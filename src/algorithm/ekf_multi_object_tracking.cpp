@@ -13,6 +13,8 @@
 
 #include "algorithm/ekf_multi_object_tracking.hpp"
 
+constexpr std::size_t mc_mot::AssociationDiagnostics::kMaximumRows;
+
 /*
     Predict all track in same dt_sec
 */
@@ -33,6 +35,16 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
     if(i_meas_num > MAX_TRACKS){
         ROS_WARN_STREAM("[EKF tracker] Too many measurements: " << i_meas_num);
         i_meas_num = MAX_TRACKS;
+    }
+    std::vector<mc_mot::AssociationDiagnosticRow> nearest_candidates;
+    if (association_diagnostics_enabled_) {
+        association_diagnostics_.measurement_stamp = measurements.time_stamp;
+        association_diagnostics_.input_count = measurements.meas.size();
+        association_diagnostics_.processed_count = i_meas_num;
+        association_diagnostics_.omitted_rows = 0;
+        association_diagnostics_.rows.clear();
+        association_diagnostics_.rows.reserve(mc_mot::AssociationDiagnostics::kMaximumRows);
+        nearest_candidates.resize(i_meas_num);
     }
     Eigen::MatrixXd cost_matrix(i_meas_num, MAX_TRACKS);
     cost_matrix.setConstant(std::numeric_limits<double>::max());
@@ -66,6 +78,21 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
                 maha_distance = 1000.0; // Shorter association distance for pedestrians
             }
 
+            if (association_diagnostics_enabled_ && all_tracks_[track_idx].is_init &&
+                (nearest_candidates[meas_idx].track_id < 0 ||
+                 l2_distance < nearest_candidates[meas_idx].distance_m)) {
+                const char* reason = "eligible_competitor";
+                const bool measurement_is_pedestrian = measurements.meas[meas_idx].classification == mc_mot::ObjectClass::PEDESTRIAN;
+                const bool track_is_pedestrian = all_tracks_[track_idx].getRepClass() == mc_mot::ObjectClass::PEDESTRIAN;
+                if (measurement_is_pedestrian != track_is_pedestrian) reason = "class_gate";
+                else if (l2_distance > config_.max_association_dist_m || (measurement_is_pedestrian && l2_distance > 2.0)) reason = "distance_gate";
+                else if (!(maha_distance < config_.max_association_dist_m)) reason = "mahalanobis_gate";
+                auto row = AssociationSnapshot("unmatched_candidate", reason, all_tracks_[track_idx], meas_idx, &measurements.meas[meas_idx]);
+                row.distance_m = l2_distance;
+                row.association_cost = maha_distance;
+                nearest_candidates[meas_idx] = row;
+            }
+
             cost_matrix(meas_idx, track_idx) = maha_distance;
             if (config_.pedestrian_gaussian_association_ranking) {
                 ranking(meas_idx, track_idx) = maha_distance;
@@ -80,6 +107,9 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
                         innovation, track.state_cov.block<2, 2>(S_X, S_X),
                         R_.block<2, 2>(0, 0), observation.detection_confidence, maha_distance);
                 }
+            }
+            if (association_diagnostics_enabled_ && nearest_candidates[meas_idx].track_id == track_idx) {
+                nearest_candidates[meas_idx].ranking_cost = config_.pedestrian_gaussian_association_ranking ? ranking(meas_idx, track_idx) : maha_distance;
             }
         }
     }
@@ -99,11 +129,28 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
         int track_idx = assignment[meas_idx];
 
         if (track_idx != -1 && all_tracks_[track_idx].is_init == true) {
+            double diagnostic_distance = 0.0;
+            double diagnostic_prior_age = 0.0;
+            bool was_confirmed = false;
+            if (association_diagnostics_enabled_) {
+                was_confirmed = all_tracks_[track_idx].is_confirmed;
+                diagnostic_distance = CalculateDistance(measurements.meas[meas_idx].state, all_tracks_[track_idx].state_vec);
+                diagnostic_prior_age = recent_timestamp_ - all_tracks_[track_idx].last_measurement_time;
+            }
             UpdateTrack(all_tracks_[track_idx], measurements.meas[meas_idx]);
 
             // KF can be performed if there are at least 2 valid detections
             if (all_tracks_[track_idx].age >= 3 && all_tracks_[track_idx].countDetectionNum() >= 2) {
                 all_tracks_[track_idx].is_confirmed = true;
+            }
+            if (association_diagnostics_enabled_) {
+                auto row = AssociationSnapshot("matched", !was_confirmed && all_tracks_[track_idx].is_confirmed ? "confirmed" : "update", all_tracks_[track_idx], meas_idx, &measurements.meas[meas_idx]);
+                row.distance_m = diagnostic_distance;
+                row.association_cost = cost_matrix(meas_idx, track_idx);
+                row.ranking_cost = config_.pedestrian_gaussian_association_ranking ? ranking(meas_idx, track_idx) : cost_matrix(meas_idx, track_idx);
+                row.prior_measurement_age_sec = diagnostic_prior_age;
+                row.track_assigned_measurement_index = meas_idx;
+                AppendAssociationDiagnostic(row);
             }
 
             asso_count++;
@@ -117,7 +164,26 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
         if (track_idx != -1 && all_tracks_[track_idx].is_init == true) {
             continue;
         }
-        if (ShouldSuppressDuplicateTrackBirth(measurements.meas[meas_idx])) {
+        if (association_diagnostics_enabled_) {
+            auto row = nearest_candidates[meas_idx];
+            row.measurement_index = meas_idx;
+            row.measurement_class = measurements.meas[meas_idx].classification;
+            row.measurement_score = measurements.meas[meas_idx].detection_confidence;
+            if (row.track_id < 0) {
+                row.event = "unmatched_candidate";
+                row.reason = "no_existing_track";
+            } else {
+                row.track_assigned_measurement_index = assignment_track[row.track_id];
+            }
+            AppendAssociationDiagnostic(row);
+        }
+        int blocking_track_id = -1;
+        if (ShouldSuppressDuplicateTrackBirth(measurements.meas[meas_idx], association_diagnostics_enabled_ ? &blocking_track_id : nullptr)) {
+            if (association_diagnostics_enabled_) {
+                auto row = AssociationSnapshot("birth_suppressed", "near_associated_mature_track", all_tracks_[blocking_track_id], meas_idx, &measurements.meas[meas_idx]);
+                row.distance_m = CalculateDistance(measurements.meas[meas_idx].state, all_tracks_[blocking_track_id].state_vec);
+                AppendAssociationDiagnostic(row);
+            }
             continue;
         }
         mc_mot::TrackStruct new_track;
@@ -125,6 +191,9 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
         InitTrack(new_track, measurements.meas[meas_idx]);
 
         all_tracks_[cur_track_id_] = new_track;
+        if (association_diagnostics_enabled_) {
+            AppendAssociationDiagnostic(AssociationSnapshot("birth", "unmatched_measurement", new_track, meas_idx, &measurements.meas[meas_idx]));
+        }
 
         UpdateTrackId(); // Increment cur_track_id_
         init_count++;
@@ -140,20 +209,26 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
             // Reset outdated tracks
             if (track.is_init == true &&
                 ShouldDeleteUnassociatedTrack(track, measurements.time_stamp)) {
+                if (association_diagnostics_enabled_) AppendAssociationDiagnostic(AssociationSnapshot("delete", track.is_confirmed && config_.time_aware_track_lifecycle ? "coast_timeout" : "tentative_outdated", track));
                 track.reset();
                 i_deleted_num++;
             }
             else if (sqrt(track.state_vec(S_VX) * track.state_vec(S_VX) +
                           track.state_vec(S_VY) * track.state_vec(S_VY)) > MAX_TRACK_VEL) {
+                if (association_diagnostics_enabled_ && track.is_init) AppendAssociationDiagnostic(AssociationSnapshot("delete", "excess_velocity", track));
                 // Reset tracks with excessive velocity
                 track.reset();
                 i_deleted_num++;
             }
             else if (sqrt(track.state_vec(S_AX) * track.state_vec(S_AX) +
                           track.state_vec(S_AY) * track.state_vec(S_AY)) > MAX_TRACK_ACC) {
+                if (association_diagnostics_enabled_ && track.is_init) AppendAssociationDiagnostic(AssociationSnapshot("delete", "excess_acceleration", track));
                 // Reset tracks with excessive acceleration
                 track.reset();
                 i_deleted_num++;
+            }
+            else if (association_diagnostics_enabled_ && track.is_init) {
+                AppendAssociationDiagnostic(AssociationSnapshot("coast", track.is_confirmed ? "confirmed_unmatched" : "tentative_unmatched", track));
             }
         }
     }
@@ -825,7 +900,8 @@ bool EkfMultiObjectTracking::ShouldDeleteUnassociatedTrack(
 }
 
 bool EkfMultiObjectTracking::ShouldSuppressDuplicateTrackBirth(
-        const mc_mot::Meastruct &measurement) const {
+        const mc_mot::Meastruct &measurement,
+        int* blocking_track_id) const {
     if (!config_.suppress_duplicate_track_birth) return false;
 
     const double measurement_max_dimension = std::max(
@@ -860,10 +936,46 @@ bool EkfMultiObjectTracking::ShouldSuppressDuplicateTrackBirth(
         }
         if (CalculateDistance(measurement.state, track.state_vec) <=
             config_.duplicate_birth_suppression_distance_m) {
+            if (blocking_track_id) *blocking_track_id = track.track_id;
             return true;
         }
     }
     return false;
+}
+
+mc_mot::AssociationDiagnosticRow EkfMultiObjectTracking::AssociationSnapshot(
+        const char* event, const char* reason, const mc_mot::TrackStruct& track,
+        const int measurement_index, const mc_mot::Meastruct* measurement) const {
+    mc_mot::AssociationDiagnosticRow row;
+    row.event = event;
+    row.reason = reason;
+    row.measurement_index = measurement_index;
+    row.track_id = track.track_id;
+    row.track_class = track.getRepClass();
+    row.prior_measurement_age_sec = recent_timestamp_ - track.last_measurement_time;
+    row.last_measurement_time = track.last_measurement_time;
+    row.initialization_time = track.initialization_time;
+    row.score = track.detection_confidence;
+    row.confirmed = track.is_confirmed;
+    row.associated = track.is_associated;
+    row.detection_count = track.countDetectionNum();
+    row.center = {{track.state_vec(S_X), track.state_vec(S_Y), track.object_z}};
+    row.velocity = {{track.state_vec(S_VX), track.state_vec(S_VY)}};
+    row.dimensions = {{track.dimension.length, track.dimension.width, track.dimension.height}};
+    std::copy(track.class_score_arr, track.class_score_arr + CLASS_NUM, row.class_votes.begin());
+    if (measurement) {
+        row.measurement_class = measurement->classification;
+        row.measurement_score = measurement->detection_confidence;
+    }
+    return row;
+}
+
+void EkfMultiObjectTracking::AppendAssociationDiagnostic(const mc_mot::AssociationDiagnosticRow& row) {
+    if (association_diagnostics_.rows.size() < mc_mot::AssociationDiagnostics::kMaximumRows) {
+        association_diagnostics_.rows.push_back(row);
+    } else {
+        ++association_diagnostics_.omitted_rows;
+    }
 }
 
 // ======== Utils Functions ============

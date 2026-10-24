@@ -32,6 +32,9 @@
   <arg name="detection_velocity_longitudinal_blend" default="1.0"/>
   <arg name="center_motion_velocity_fusion" default="false"/>
   <arg name="publish_center_motion_diagnostics" default="false"/>
+  <arg name="publish_association_diagnostics" default="false"/>
+  <arg name="association_diagnostics_topic"
+       default="/perception/object_recognition/tracking/diagnostics/association"/>
   <arg name="center_motion_active_objects"
        default="/perception/object_recognition/tracking/center_motion_active_objects"/>
   <arg name="center_motion_inactive_objects"
@@ -147,8 +150,10 @@
         output="screen"
         respawn="false">
     <param name="world_frame_id" value="$(arg world_frame_id)"/>
+    <param name="publish_association_diagnostics" value="$(arg publish_association_diagnostics)"/>
     <remap from="~input/objects" to="$(arg input_objects)"/>
     <remap from="~output/objects" to="$(arg output_objects)"/>
+    <remap from="~diagnostics/association" to="$(arg association_diagnostics_topic)"/>
     <remap from="~diagnostics/center_motion_active_objects"
            to="$(arg center_motion_active_objects)"/>
     <remap from="~diagnostics/center_motion_inactive_objects"
