@@ -212,6 +212,247 @@ TEST(TrackLifecycle, LegacyModeStillUsesFrameCountDeletion) {
   EXPECT_TRUE(InitializedTracks(*tracker).empty());
 }
 
+namespace {
+void ConfirmSmall(EkfMultiObjectTracking& tracker, double& time,
+                  mc_mot::ObjectClass label=mc_mot::UNKNOWN, double side=.6) {
+  time=1.;
+  Update(tracker,time,{Measurement(time,0.,0.,label,side,side)});
+  for (double next : {1.1,1.2,1.3})
+    PredictAndUpdate(tracker,time,next,{Measurement(next,0.,0.,label,side,side)});
+  ASSERT_EQ(InitializedTracks(tracker).size(),1U);
+  ASSERT_TRUE(InitializedTracks(tracker).front().is_confirmed);
+}
+
+std::size_t SmallPairCount(double distance, double new_height=1., double z=0.,
+                           double side=.6, bool enabled=true, double old_height=1.) {
+  MultiClassObjectTrackingConfig config;
+  config.suppress_small_unknown_duplicate_birth=enabled;
+  config.duplicate_birth_minimum_max_dimension_m=2.;
+  auto tracker=std::make_unique<EkfMultiObjectTracking>(config);
+  double time=1.;
+  auto old=Measurement(time,0.,0.,mc_mot::UNKNOWN,side,side);
+  old.dimension.height=old_height;
+  Update(*tracker,time,{old});
+  for (double next : {1.1,1.2,1.3}) {
+    old.state.time_stamp=next;
+    PredictAndUpdate(*tracker,time,next,{old});
+  }
+  old.state.time_stamp=1.4;
+  auto added=Measurement(1.4,distance,0.,mc_mot::UNKNOWN,side,side);
+  added.dimension.height=new_height;
+  added.state.z=z;
+  PredictAndUpdate(*tracker,time,1.4,{added,old});
+  return InitializedTracks(*tracker).size();
+}
+}  // namespace
+
+TEST(SmallUnknownBirthGuard, DefaultIsOffAndExistingSmallBirthBehaviorIsPreserved) {
+  EXPECT_FALSE(MultiClassObjectTrackingConfig{}.suppress_small_unknown_duplicate_birth);
+  EXPECT_EQ(SmallPairCount(.1,1.,0.,.6,false),2U);
+}
+
+TEST(SmallUnknownBirthGuard, CurrentRawOverlapSuppressesBirthRegardlessOfInputOrder) {
+  for (bool reverse : {false,true}) {
+    MultiClassObjectTrackingConfig config;
+    config.suppress_small_unknown_duplicate_birth=true;
+    auto tracker=std::make_unique<EkfMultiObjectTracking>(config);
+    tracker->SetAssociationDiagnosticsEnabled(true);
+    double time;
+    ConfirmSmall(*tracker,time);
+    const int original=ConfirmedTrackId(*tracker);
+    std::vector<mc_mot::Meastruct> pair{
+        Measurement(1.4,.1,0.,mc_mot::UNKNOWN,.6,.6),
+        Measurement(1.4,0.,0.,mc_mot::UNKNOWN,.6,.6)};
+    if (reverse) std::reverse(pair.begin(),pair.end());
+    PredictAndUpdate(*tracker,time,1.4,pair);
+    ASSERT_EQ(InitializedTracks(*tracker).size(),1U);
+    EXPECT_EQ(ConfirmedTrackId(*tracker),original);
+    bool found=false;
+    for (const auto& row : tracker->GetAssociationDiagnostics().rows)
+      found |= std::string(row.event)=="birth_suppressed" &&
+          std::string(row.reason)=="small_raw_overlap_associated_unknown";
+    EXPECT_TRUE(found);
+  }
+}
+
+TEST(SmallUnknownBirthGuard, AdjacentDrumsAndSmallSeparateObjectsRemainDistinct) {
+  for (double distance : {.5,.75,1.0}) EXPECT_EQ(SmallPairCount(distance),2U);
+  EXPECT_EQ(SmallPairCount(.2,1.,0.,.2),2U);  // touch but do not overlap
+}
+
+TEST(SmallUnknownBirthGuard, SameXYDifferentHeightOrVerticalPositionIsNotMerged) {
+  EXPECT_EQ(SmallPairCount(0.,1.,.301),2U);
+  EXPECT_EQ(SmallPairCount(0.,1.501),2U);
+  EXPECT_EQ(SmallPairCount(0.,.149,0.,.6,true,.2),2U);
+  EXPECT_EQ(SmallPairCount(.1,std::numeric_limits<double>::quiet_NaN()),2U);
+  EXPECT_EQ(SmallPairCount(.1,std::numeric_limits<double>::infinity()),2U);
+}
+
+TEST(SmallUnknownBirthGuard, InclusiveGeometryBoundariesAndStrictSmallScope) {
+  EXPECT_EQ(SmallPairCount(.25,1.,0.,.9),1U);
+  EXPECT_EQ(SmallPairCount(.250001,1.,0.,.9),2U);
+  EXPECT_EQ(SmallPairCount(.1,1.,.30),1U);
+  EXPECT_EQ(SmallPairCount(.1,1.5),1U);
+  EXPECT_EQ(SmallPairCount(.1,.15,0.,.6,true,.2),1U);
+  const double boundary=.6*(1.-.45)/(1.+.45);
+  EXPECT_EQ(SmallPairCount(boundary-1.e-6),1U);
+  EXPECT_EQ(SmallPairCount(boundary+1.e-6),2U);
+  // The new scope is a fixed <1m raw XY contract, not a silent expansion
+  // when the independent legacy minimum dimension is raised to 2m.
+  EXPECT_EQ(SmallPairCount(.1,1.,0.,.999),1U);
+  EXPECT_EQ(SmallPairCount(.1,1.,0.,1.0),2U);
+}
+
+TEST(SmallUnknownBirthGuard, TwoCurrentSupportedMatchesAreAmbiguous) {
+  MultiClassObjectTrackingConfig config;
+  config.suppress_small_unknown_duplicate_birth=true;
+  auto tracker=std::make_unique<EkfMultiObjectTracking>(config);
+  double time=1.;
+  for (int i=0;i<5;++i) {
+    double next=1.+i*.1;
+    const std::vector<mc_mot::Meastruct> pair{
+        Measurement(next,0.,0.,mc_mot::UNKNOWN,.6,.6),
+        Measurement(next,.4,0.,mc_mot::UNKNOWN,.6,.6)};
+    if (!i) Update(*tracker,next,pair);
+    else PredictAndUpdate(*tracker,time,next,pair);
+  }
+  ASSERT_EQ(InitializedTracks(*tracker).size(),2U);
+  PredictAndUpdate(*tracker,time,1.5,{
+      Measurement(1.5,0.,0.,mc_mot::UNKNOWN,.6,.6),
+      Measurement(1.5,.4,0.,mc_mot::UNKNOWN,.6,.6),
+      Measurement(1.5,.2,0.,mc_mot::UNKNOWN,.6,.6)});
+  EXPECT_EQ(InitializedTracks(*tracker).size(),3U);
+}
+
+TEST(SmallUnknownBirthGuard, KnownVehicleAndPedestrianEvidenceCannotSuppressUnknownBirth) {
+  for (auto label : {mc_mot::CAR,mc_mot::TRUCK,mc_mot::PEDESTRIAN,mc_mot::BICYCLE}) {
+    MultiClassObjectTrackingConfig config;
+    config.suppress_small_unknown_duplicate_birth=true;
+    auto tracker=std::make_unique<EkfMultiObjectTracking>(config);
+    double time;
+    ConfirmSmall(*tracker,time,label);
+    PredictAndUpdate(*tracker,time,1.4,{
+        Measurement(1.4,0.,0.,label,.6,.6),
+        Measurement(1.4,.1,0.,mc_mot::UNKNOWN,.6,.6)});
+    EXPECT_EQ(InitializedTracks(*tracker).size(),2U);
+  }
+}
+
+TEST(SmallUnknownBirthGuard, PreviouslyKnownClassRemainsProtectedAfterUnknownVotes) {
+  MultiClassObjectTrackingConfig config;
+  config.suppress_small_unknown_duplicate_birth=true;
+  auto tracker=std::make_unique<EkfMultiObjectTracking>(config);
+  double time;
+  ConfirmSmall(*tracker,time,mc_mot::CAR);
+  for (int i=0;i<20;++i) {
+    const double next=1.4+i*.1;
+    PredictAndUpdate(*tracker,time,next,{Measurement(next,0.,0.,mc_mot::UNKNOWN,.6,.6)});
+  }
+  ASSERT_EQ(InitializedTracks(*tracker).front().getRepClass(),mc_mot::UNKNOWN);
+  ASSERT_TRUE(InitializedTracks(*tracker).front().has_known_class_measurement);
+  PredictAndUpdate(*tracker,time,3.4,{
+      Measurement(3.4,0.,0.,mc_mot::UNKNOWN,.6,.6),
+      Measurement(3.4,.1,0.,mc_mot::UNKNOWN,.6,.6)});
+  EXPECT_EQ(InitializedTracks(*tracker).size(),2U);
+}
+
+TEST(SmallUnknownBirthGuard, MovingKnownVehicleIsNotSuppressedOrUsedAsUnknownEvidence) {
+  MultiClassObjectTrackingConfig config;
+  config.suppress_small_unknown_duplicate_birth=true;
+  auto tracker=std::make_unique<EkfMultiObjectTracking>(config);
+  double time=1.;
+  for (int i=0;i<30;++i) {
+    const double next=1.+i*.1;
+    auto car=Measurement(next,i*.8,0.,mc_mot::CAR,4.5,1.8);
+    if (!i) Update(*tracker,next,{car});
+    else PredictAndUpdate(*tracker,time,next,{car});
+  }
+  ASSERT_GT(InitializedTracks(*tracker).front().state_vec(S_VX),7.);
+  PredictAndUpdate(*tracker,time,4.,{
+      Measurement(4.,24.,0.,mc_mot::CAR,4.5,1.8),
+      Measurement(4.,24.1,0.,mc_mot::UNKNOWN,.6,.6)});
+  EXPECT_EQ(InitializedTracks(*tracker).size(),2U);
+}
+
+TEST(SmallUnknownBirthGuard, DoesNotSuppressSmallPedestriansOrTentativeCompetitors) {
+  for (auto label : {mc_mot::UNKNOWN,mc_mot::PEDESTRIAN}) {
+    MultiClassObjectTrackingConfig config;
+    config.suppress_small_unknown_duplicate_birth=true;
+    auto tracker=std::make_unique<EkfMultiObjectTracking>(config);
+    Update(*tracker,1.,{Measurement(1.,0.,0.,label,.6,.6)});
+    double time=1.;
+    PredictAndUpdate(*tracker,time,1.1,{
+        Measurement(1.1,0.,0.,label,.6,.6),
+        Measurement(1.1,.1,0.,label,.6,.6)});
+    EXPECT_EQ(InitializedTracks(*tracker).size(),2U);
+  }
+}
+
+TEST(SmallUnknownBirthGuard, RotatedAndQuarterTurnSwappedRawBoxesUseActualFootprint) {
+  MultiClassObjectTrackingConfig config;
+  config.suppress_small_unknown_duplicate_birth=true;
+  auto tracker=std::make_unique<EkfMultiObjectTracking>(config);
+  double time=1.;
+  auto old=Measurement(1.,0.,0.,mc_mot::UNKNOWN,.9,.5);
+  Update(*tracker,time,{old});
+  for (double next : {1.1,1.2,1.3}) {
+    old.state.time_stamp=next;
+    PredictAndUpdate(*tracker,time,next,{old});
+  }
+  old.state.time_stamp=1.4;
+  auto rotated=Measurement(1.4,.1,0.,mc_mot::UNKNOWN,.5,.9);
+  rotated.state.yaw=M_PI/2.;
+  PredictAndUpdate(*tracker,time,1.4,{rotated,old});
+  EXPECT_EQ(InitializedTracks(*tracker).size(),1U);
+}
+
+TEST(SmallUnknownBirthGuard, MasterBirthGuardSwitchStillDisablesTheComplement) {
+  MultiClassObjectTrackingConfig config;
+  config.suppress_small_unknown_duplicate_birth=true;
+  config.suppress_duplicate_track_birth=false;
+  auto tracker=std::make_unique<EkfMultiObjectTracking>(config);
+  double time;
+  ConfirmSmall(*tracker,time);
+  PredictAndUpdate(*tracker,time,1.4,{
+      Measurement(1.4,0.,0.,mc_mot::UNKNOWN,.6,.6),
+      Measurement(1.4,.1,0.,mc_mot::UNKNOWN,.6,.6)});
+  EXPECT_EQ(InitializedTracks(*tracker).size(),2U);
+}
+
+TEST(SmallUnknownBirthGuard, BothCurrentRawBoxesMustBeStrictlyBelowOneMeter) {
+  for (double matched_side : {.999,1.0,1.1}) {
+    MultiClassObjectTrackingConfig config;
+    config.suppress_small_unknown_duplicate_birth=true;
+    config.duplicate_birth_minimum_max_dimension_m=2.;
+    auto tracker=std::make_unique<EkfMultiObjectTracking>(config);
+    double time;
+    ConfirmSmall(*tracker,time,mc_mot::UNKNOWN,matched_side);
+    PredictAndUpdate(*tracker,time,1.4,{
+        Measurement(1.4,0.,0.,mc_mot::UNKNOWN,matched_side,matched_side),
+        Measurement(1.4,.05,0.,mc_mot::UNKNOWN,.8,.8)});
+    EXPECT_EQ(InitializedTracks(*tracker).size(),matched_side<1.0 ? 1U : 2U);
+  }
+}
+
+TEST(SmallUnknownBirthGuard, EitherMatchedRawAxisAtTheBoundaryExcludesSmallScope) {
+  for (bool swapped : {false,true}) {
+    MultiClassObjectTrackingConfig config;
+    config.suppress_small_unknown_duplicate_birth=true;
+    config.duplicate_birth_minimum_max_dimension_m=2.;
+    auto tracker=std::make_unique<EkfMultiObjectTracking>(config);
+    double time=1.;
+    auto old=Measurement(time,0.,0.,mc_mot::UNKNOWN,swapped ? .8 : 1.,swapped ? 1. : .8);
+    Update(*tracker,time,{old});
+    for (double next : {1.1,1.2,1.3}) {
+      old.state.time_stamp=next;
+      PredictAndUpdate(*tracker,time,next,{old});
+    }
+    old.state.time_stamp=1.4;
+    PredictAndUpdate(*tracker,time,1.4,{old,Measurement(1.4,.05,0.,mc_mot::UNKNOWN,.8,.8)});
+    EXPECT_EQ(InitializedTracks(*tracker).size(),2U);
+  }
+}
+
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

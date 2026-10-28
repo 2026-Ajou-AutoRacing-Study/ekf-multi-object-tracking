@@ -13,6 +13,7 @@
   <arg name="confirmed_stationary_track_max_coast_time_sec" default="1.00"/>
   <arg name="lifecycle_stationary_speed_threshold_mps" default="2.0"/>
   <arg name="suppress_duplicate_track_birth" default="true"/>
+  <arg name="suppress_small_unknown_duplicate_birth" default="false"/>
   <arg name="duplicate_birth_suppression_distance_m" default="0.75"/>
   <arg name="duplicate_birth_minimum_max_dimension_m" default="1.0"/>
   <arg name="duplicate_birth_maximum_dimension_ratio" default="2.0"/>
@@ -151,6 +152,8 @@
          value="$(arg lifecycle_stationary_speed_threshold_mps)"/>
   <param name="configure/suppress_duplicate_track_birth"
          value="$(arg suppress_duplicate_track_birth)"/>
+  <param name="configure/suppress_small_unknown_duplicate_birth"
+         value="$(arg suppress_small_unknown_duplicate_birth)"/>
   <param name="configure/duplicate_birth_suppression_distance_m"
          value="$(arg duplicate_birth_suppression_distance_m)"/>
   <param name="configure/duplicate_birth_minimum_max_dimension_m"

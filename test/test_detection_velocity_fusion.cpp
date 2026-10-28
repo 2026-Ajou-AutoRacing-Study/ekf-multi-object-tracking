@@ -31,7 +31,7 @@ mc_mot::Meastruct Measurement(
   return measurement;
 }
 
-const mc_mot::TrackStruct& InitializedTrack(const mc_mot::TrackStructs& tracks) {
+mc_mot::TrackStruct InitializedTrack(const mc_mot::TrackStructs& tracks) {
   for (const auto& track : tracks.track) {
     if (track.is_init) return track;
   }

@@ -54,6 +54,89 @@ bool IsShapeConflictingCompetitor(const mc_mot::Meastruct& observation,
     return InsideFootprint(tentative.state_vec(S_X), tentative.state_vec(S_Y), mature) &&
            InsideFootprint(observation.state.x, observation.state.y, mature);
 }
+
+struct FootprintPoint { double x, y; };
+
+double Cross(const FootprintPoint& a, const FootprintPoint& b, const FootprintPoint& p) {
+    return (b.x-a.x)*(p.y-a.y) - (b.y-a.y)*(p.x-a.x);
+}
+
+std::vector<FootprintPoint> RawFootprint(const mc_mot::Meastruct& box,
+                                       const double origin_x, const double origin_y) {
+    const double c=std::cos(box.state.yaw), s=std::sin(box.state.yaw);
+    const double half_l=box.dimension.length*.5, half_w=box.dimension.width*.5;
+    std::vector<FootprintPoint> corners;
+    for (const auto& offset : std::array<FootprintPoint,4>{{
+            {-half_l,-half_w}, {half_l,-half_w}, {half_l,half_w}, {-half_l,half_w}}}) {
+        corners.push_back({box.state.x-origin_x+c*offset.x-s*offset.y,
+                           box.state.y-origin_y+s*offset.x+c*offset.y});
+    }
+    return corners;
+}
+
+double PolygonArea(const std::vector<FootprintPoint>& polygon) {
+    double twice_area=0.;
+    for (std::size_t i=0; i<polygon.size(); ++i) {
+        const auto& a=polygon[i];
+        const auto& b=polygon[(i+1)%polygon.size()];
+        twice_area += a.x*b.y-a.y*b.x;
+    }
+    return std::abs(twice_area)*.5;
+}
+
+double RawFootprintIoU(const mc_mot::Meastruct& one, const mc_mot::Meastruct& two) {
+    // Relative coordinates avoid subtracting huge map-coordinate area terms.
+    auto polygon=RawFootprint(one,one.state.x,one.state.y);
+    const auto clip=RawFootprint(two,one.state.x,one.state.y);
+    for (std::size_t i=0; i<clip.size(); ++i) {
+        const auto source=polygon;
+        polygon.clear();
+        if (source.empty()) return 0.;
+        const auto& a=clip[i];
+        const auto& b=clip[(i+1)%clip.size()];
+        auto previous=source.back();
+        double before=Cross(a,b,previous);
+        for (const auto& point : source) {
+            const double after=Cross(a,b,point);
+            if ((after>=0.) != (before>=0.)) {
+                const double fraction=before/(before-after);
+                polygon.push_back({previous.x+fraction*(point.x-previous.x),
+                                   previous.y+fraction*(point.y-previous.y)});
+            }
+            if (after>=0.) polygon.push_back(point);
+            previous=point;
+            before=after;
+        }
+    }
+    const double intersection=PolygonArea(polygon);
+    const double area_one=one.dimension.length*one.dimension.width;
+    const double area_two=two.dimension.length*two.dimension.width;
+    const double denominator=area_one+area_two-intersection;
+    const double iou=denominator>1.e-12 ? intersection/denominator : 0.;
+    return std::isfinite(iou) ? iou : 0.;
+}
+
+bool ValidRawBox(const mc_mot::Meastruct& box) {
+    return std::isfinite(box.state.x) && std::isfinite(box.state.y) &&
+        std::isfinite(box.state.z) && std::isfinite(box.state.yaw) &&
+        std::isfinite(box.dimension.length) && std::isfinite(box.dimension.width) &&
+        std::isfinite(box.dimension.height) &&
+        std::min({box.dimension.length,box.dimension.width,box.dimension.height})>=.15;
+}
+
+bool SmallRawOverlapCompatible(const mc_mot::Meastruct& one,
+                               const mc_mot::Meastruct& two) {
+    if (!ValidRawBox(one) || !ValidRawBox(two) ||
+        std::hypot(one.state.x-two.state.x,one.state.y-two.state.y)>.25 ||
+        std::abs(one.state.z-two.state.z)>.30) return false;
+    const std::array<double,3> first{{std::min(one.dimension.length,one.dimension.width),
+        std::max(one.dimension.length,one.dimension.width),one.dimension.height}};
+    const std::array<double,3> second{{std::min(two.dimension.length,two.dimension.width),
+        std::max(two.dimension.length,two.dimension.width),two.dimension.height}};
+    for (std::size_t i=0; i<first.size(); ++i)
+        if (std::max(first[i],second[i])/std::min(first[i],second[i])>1.5) return false;
+    return RawFootprintIoU(one,two)>=.45;
+}
 }  // namespace
 
 /*
@@ -256,9 +339,16 @@ void EkfMultiObjectTracking::RunUpdate(const mc_mot::Meastructs &measurements) {
             AppendAssociationDiagnostic(row);
         }
         int blocking_track_id = -1;
-        if (ShouldSuppressDuplicateTrackBirth(measurements.meas[meas_idx], association_diagnostics_enabled_ ? &blocking_track_id : nullptr)) {
+        const bool legacy_duplicate = ShouldSuppressDuplicateTrackBirth(
+            measurements.meas[meas_idx], association_diagnostics_enabled_ ? &blocking_track_id : nullptr);
+        const bool small_raw_duplicate = !legacy_duplicate && ShouldSuppressSmallUnknownDuplicateBirth(
+            measurements.meas[meas_idx], measurements, assignment_track,
+            association_diagnostics_enabled_ ? &blocking_track_id : nullptr);
+        if (legacy_duplicate || small_raw_duplicate) {
             if (association_diagnostics_enabled_) {
-                auto row = AssociationSnapshot("birth_suppressed", "near_associated_mature_track", all_tracks_[blocking_track_id], meas_idx, &measurements.meas[meas_idx]);
+                auto row = AssociationSnapshot("birth_suppressed", small_raw_duplicate
+                    ? "small_raw_overlap_associated_unknown" : "near_associated_mature_track",
+                    all_tracks_[blocking_track_id], meas_idx, &measurements.meas[meas_idx]);
                 row.distance_m = CalculateDistance(measurements.meas[meas_idx].state, all_tracks_[blocking_track_id].state_vec);
                 AppendAssociationDiagnostic(row);
             }
@@ -1075,6 +1165,35 @@ bool EkfMultiObjectTracking::ShouldSuppressDuplicateTrackBirth(
         }
     }
     return false;
+}
+
+bool EkfMultiObjectTracking::ShouldSuppressSmallUnknownDuplicateBirth(
+        const mc_mot::Meastruct &measurement,
+        const mc_mot::Meastructs &measurements,
+        const std::vector<int> &assignment_track,
+        int* blocking_track_id) const {
+    if (!config_.suppress_duplicate_track_birth || !config_.suppress_small_unknown_duplicate_birth ||
+        measurement.classification!=mc_mot::UNKNOWN || !ValidRawBox(measurement) ||
+        std::max(measurement.dimension.length,measurement.dimension.width)>=1.0) return false;
+    int unique_track=-1;
+    for (const auto& track : all_tracks_) {
+        if (!track.is_init || !track.is_confirmed || !track.is_associated ||
+            track.getRepClass()!=mc_mot::UNKNOWN || track.has_known_class_measurement ||
+            track.track_id<0 || static_cast<std::size_t>(track.track_id)>=assignment_track.size()) continue;
+        const int index=assignment_track[track.track_id];
+        if (index<0 || static_cast<std::size_t>(index)>=measurements.meas.size()) continue;
+        const auto& raw=measurements.meas[index];
+        if (raw.classification!=mc_mot::UNKNOWN ||
+            std::max(raw.dimension.length,raw.dimension.width)>=1.0 ||
+            !SmallRawOverlapCompatible(measurement,raw)) continue;
+        // Two current supported explanations are ambiguous. Do not choose one
+        // by iteration order or erase a genuinely separate small observation.
+        if (unique_track>=0) return false;
+        unique_track=track.track_id;
+    }
+    if (unique_track<0) return false;
+    if (blocking_track_id) *blocking_track_id=unique_track;
+    return true;
 }
 
 mc_mot::AssociationDiagnosticRow EkfMultiObjectTracking::AssociationSnapshot(

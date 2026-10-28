@@ -382,6 +382,10 @@ struct MultiClassObjectTrackingConfig {
     // Do not let such an unmatched measurement create a second track next to
     // an already-associated mature large-object track.
     bool suppress_duplicate_track_birth{true};
+    // Opt-in complement for small UNKNOWN boxes skipped by the generic guard.
+    // Require two <1m raw XY boxes and a unique mature UNKNOWN with a strongly
+    // overlapping current measurement; do not merge tracks or widen coasting.
+    bool suppress_small_unknown_duplicate_birth{false};
     double duplicate_birth_suppression_distance_m{0.75};
     double duplicate_birth_minimum_max_dimension_m{1.0};
     double duplicate_birth_maximum_dimension_ratio{2.0};
@@ -497,6 +501,11 @@ private:
         double measurement_time) const;
     bool ShouldSuppressDuplicateTrackBirth(
         const mc_mot::Meastruct &measurement,
+        int* blocking_track_id = nullptr) const;
+    bool ShouldSuppressSmallUnknownDuplicateBirth(
+        const mc_mot::Meastruct &measurement,
+        const mc_mot::Meastructs &measurements,
+        const std::vector<int> &assignment_track,
         int* blocking_track_id = nullptr) const;
     bool AreLifecycleClassesCompatible(
         mc_mot::ObjectClass measurement_class,

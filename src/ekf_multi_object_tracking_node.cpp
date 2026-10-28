@@ -395,6 +395,10 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
         "configure/suppress_duplicate_track_birth",
         config_.suppress_duplicate_track_birth,
         true);
+    nh.param<bool>(
+        "configure/suppress_small_unknown_duplicate_birth",
+        config_.suppress_small_unknown_duplicate_birth,
+        false);
     nh.param<double>(
         "configure/duplicate_birth_suppression_distance_m",
         config_.duplicate_birth_suppression_distance_m,
@@ -541,6 +545,8 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
         << config_.confirmed_stationary_track_max_coast_time_sec
         << " duplicate_birth_guard="
         << config_.suppress_duplicate_track_birth
+        << " small_unknown_duplicate_birth_guard="
+        << config_.suppress_small_unknown_duplicate_birth
         << " duplicate_birth_distance="
         << config_.duplicate_birth_suppression_distance_m
         << " pedestrian_gaussian_rank="
