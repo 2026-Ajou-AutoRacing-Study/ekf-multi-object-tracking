@@ -89,7 +89,7 @@ if(CATKIN_ENABLE_TESTING)
   if(TARGET test_class_transition_guard)
     target_link_libraries(test_class_transition_guard ${catkin_LIBRARIES})
   endif()
-  foreach(consistency_test test_class_transition_integration test_shape_consistent_association)
+  foreach(consistency_test test_class_transition_integration test_shape_consistent_association test_unknown_output_projection)
     catkin_add_gtest(${consistency_test}
       test/${consistency_test}.cpp src/algorithm/ekf_multi_object_tracking.cpp)
     if(TARGET ${consistency_test})

@@ -11,6 +11,11 @@ configure:
   output_local_coord: false  # standardized output remains in map
   output_period_lidar: true  # publish once per detector measurement
   output_confirmed_track: true  # false: output all track, true: output confirmed track
+  # Candidate only: preserve UNKNOWN measurement pose in predicted output
+  # copies; does not freeze actual new measurements or modify the EKF state.
+  hold_unknown_output_pose: false
+  # Stronger, independent candidate: stationary UNKNOWN prior, not just copies.
+  stationary_unknown_prediction: false
 
   use_predefined_ref_point: false  # false: use initial lat lon as ref, true: use defined ref
   reference_lat: 37.23855064

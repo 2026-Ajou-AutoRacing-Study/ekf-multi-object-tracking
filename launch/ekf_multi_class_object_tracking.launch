@@ -21,6 +21,8 @@
   <arg name="orientation_flip_enter_error_deg" default="100.0"/>
   <arg name="orientation_flip_exit_error_deg" default="80.0"/>
   <arg name="compensate_output_to_current_time" default="false"/>
+  <arg name="hold_unknown_output_pose" default="false"/>
+  <arg name="stationary_unknown_prediction" default="false"/>
   <arg name="maximum_output_compensation_sec" default="0.25"/>
   <arg name="fixed_output_rate_hz" default="0.0"/>
   <arg name="maximum_fixed_output_prediction_age_sec" default="0.25"/>
@@ -77,6 +79,10 @@
          value="$(arg orientation_flip_exit_error_deg)"/>
   <param name="configure/compensate_output_to_current_time"
          value="$(arg compensate_output_to_current_time)"/>
+  <param name="configure/hold_unknown_output_pose"
+         value="$(arg hold_unknown_output_pose)"/>
+  <param name="configure/stationary_unknown_prediction"
+         value="$(arg stationary_unknown_prediction)"/>
   <param name="configure/maximum_output_compensation_sec"
          value="$(arg maximum_output_compensation_sec)"/>
   <param name="configure/fixed_output_rate_hz"

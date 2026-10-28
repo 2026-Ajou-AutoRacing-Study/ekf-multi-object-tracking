@@ -135,6 +135,9 @@ struct TrackStruct {
     double detector_velocity_variance_mps2{1.0};
     double detection_confidence{0.0};
     unsigned int age{0};
+    // A temporary UNKNOWN vote must not turn a previously known moving class
+    // into a world-static prediction. Reset with the slot, not with class EMA.
+    bool has_known_class_measurement{false};
 
     double direction_score{1.0}; // 1.0 High, -1 Low
     Eigen::Vector8d state_vec;   // X Y YAW VX VY YAWRATE AX AY
@@ -243,6 +246,7 @@ struct TrackStruct {
         detector_velocity_variance_mps2 = 1.0;
         detection_confidence = 0.0;
         age = 0;
+        has_known_class_measurement = false;
 
         classification = ObjectClass::UNKNOWN;
         direction_score = 0.0;
@@ -330,6 +334,17 @@ struct MultiClassObjectTrackingConfig {
     bool output_local_coord{false};
     bool output_period_lidar{false};
     bool output_confirmed_track{false};
+
+    // Opt-in output-copy policy for a stationary UNKNOWN class in a world
+    // frame. Do not advect its pose through detector/output latency while the
+    // downstream motion policy reports zero twist. Internal EKF/associations
+    // and fresh measurement-time poses remain unchanged.
+    bool hold_unknown_output_pose{false};
+    // Separate research candidate: use a stationary world-frame transition
+    // for UNKNOWN priors as well as output copies only until a known-class
+    // measurement has been associated. Fresh position updates remain enabled;
+    // known-class history protects motion through temporary UNKNOWN/dropouts.
+    bool stationary_unknown_prediction{false};
 
     // Experimental asymmetric promotion: only an already confirmed UNKNOWN
     // can adopt a high-confidence associated vehicle observation immediately.

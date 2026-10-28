@@ -356,7 +356,21 @@ mc_mot::TrackStructs EkfMultiObjectTracking::GetPredictedTrackResults(
     const double dt = target_timestamp - results.time_stamp;
     if (dt <= 0.0) return results;
     for (auto& track : results.track) {
-        if (track.is_init) PredictTrack(track, dt);
+        if (!track.is_init) continue;
+        const bool hold_pose = config_.hold_unknown_output_pose &&
+            config_.global_coord_track && track.getRepClass() == mc_mot::UNKNOWN;
+        const double measured_x = track.state_vec(S_X);
+        const double measured_y = track.state_vec(S_Y);
+        const double measured_yaw = track.state_vec(S_YAW);
+        PredictTrack(track, dt);
+        if (hold_pose) {
+            // Retain predicted uncertainty; only the copied pose is held.
+            // The internal measurement-time filter and estimated velocity
+            // remain diagnostic, and a later CAR label projects normally.
+            track.state_vec(S_X) = measured_x;
+            track.state_vec(S_Y) = measured_y;
+            track.state_vec(S_YAW) = measured_yaw;
+        }
     }
     results.time_stamp = target_timestamp;
     return results;
@@ -371,6 +385,21 @@ void EkfMultiObjectTracking::UpdateConfig(const MultiClassObjectTrackingConfig c
 // Utils
 
 void EkfMultiObjectTracking::PredictTrack(mc_mot::TrackStruct &track, double dt) {
+    if (config_.stationary_unknown_prediction && config_.global_coord_track &&
+        track.getRepClass() == mc_mot::UNKNOWN && !track.has_known_class_measurement) {
+        // Identity transition: pose does not depend on a noisy hidden velocity.
+        // Keep latent dynamic state/uncertainty for later class recovery, rather
+        // than resetting the EKF or freezing actual measurement corrections.
+        // Existing process velocity noise supplies a dt-aware random-walk
+        // allowance for changes in a static object's observed center.
+        Eigen::Matrix8_8d stationary_noise = Q_;
+        const double displacement_std = config_.system_noise_std_vx_vy_ms * dt;
+        stationary_noise(S_X, S_X) += displacement_std * displacement_std;
+        stationary_noise(S_Y, S_Y) += displacement_std * displacement_std;
+        track.state_cov += stationary_noise;
+        track.update_time += dt;
+        return;
+    }
     double track_vel =
             sqrt(track.state_vec(S_VX) * track.state_vec(S_VX) + track.state_vec(S_VY) * track.state_vec(S_VY));
 
@@ -476,6 +505,14 @@ void EkfMultiObjectTracking::PredictTrack(mc_mot::TrackStruct &track, double dt)
 }
 
 void EkfMultiObjectTracking::UpdateTrack(mc_mot::TrackStruct &track, const mc_mot::Meastruct &measurement) {
+    // Be conservative about dynamic evidence: even one associated known-class
+    // measurement restores the original motion model for this track's lifetime.
+    // Do not rely on the representative-class EMA, which can decay to UNKNOWN.
+    track.has_known_class_measurement = track.has_known_class_measurement ||
+        measurement.classification == mc_mot::CAR ||
+        measurement.classification == mc_mot::TRUCK ||
+        measurement.classification == mc_mot::PEDESTRIAN ||
+        measurement.classification == mc_mot::BICYCLE;
     const auto class_decision = class_transition_guard::Evaluate(
         config_.class_transition_guard_config, track.class_transition_state,
         track.is_confirmed, track.getRepClass(),
@@ -817,6 +854,11 @@ void EkfMultiObjectTracking::InitTrack(mc_mot::TrackStruct &track, const mc_mot:
     track.update_time = measurement.state.time_stamp;
     track.last_measurement_time = measurement.state.time_stamp;
     track.detection_confidence = measurement.detection_confidence;
+    track.has_known_class_measurement =
+        measurement.classification == mc_mot::CAR ||
+        measurement.classification == mc_mot::TRUCK ||
+        measurement.classification == mc_mot::PEDESTRIAN ||
+        measurement.classification == mc_mot::BICYCLE;
 
     track.state_vec(S_X) = measurement.state.x;
     track.state_vec(S_Y) = measurement.state.y;
