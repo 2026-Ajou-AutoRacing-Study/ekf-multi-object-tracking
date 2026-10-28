@@ -364,3 +364,8 @@ TEST(StationaryUnknownPrediction, KnownVehiclesAndPedestriansRemainExactlyUnchan
     EXPECT_TRUE((output.state_cov.array() == original.state_cov.array()).all());
   }
 }
+
+int main(int argc, char** argv) {
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}
