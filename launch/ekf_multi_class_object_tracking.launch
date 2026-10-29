@@ -23,8 +23,10 @@
   <arg name="orientation_flip_exit_error_deg" default="80.0"/>
   <arg name="compensate_output_to_current_time" default="false"/>
   <arg name="hold_unknown_output_pose" default="false"/>
-  <arg name="hold_unknown_coasting_pose" default="false"/>
-  <arg name="hold_stationary_known_output_pose" default="false"/>
+  <!-- Production ON, one-switch rollback. Direct C++ config remains opt-in. -->
+  <arg name="hold_stationary_output_pose" default="true"/>
+  <arg name="hold_unknown_coasting_pose" default="$(arg hold_stationary_output_pose)"/>
+  <arg name="hold_stationary_known_output_pose" default="$(arg hold_stationary_output_pose)"/>
   <arg name="planning_ownership_config" default="$(env AJOUNICE_ROOT)/planning_ws/src/autoware_launch/config/ros1/planning/behavior_path_modules.yaml"/>
   <arg name="stationary_unknown_prediction" default="false"/>
   <arg name="maximum_output_compensation_sec" default="0.25"/>
