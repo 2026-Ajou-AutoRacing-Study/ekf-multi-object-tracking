@@ -28,10 +28,12 @@ void UpdateOutputMotion(mc_mot::TrackStruct &track,
     if (!config.hold_stationary_known_output_pose || !SupportedStaticClass(track)) return;
     const double enter = track.getRepClass() == mc_mot::PEDESTRIAN
         ? config.output_pedestrian_dynamic_enter_mps : config.output_vehicle_dynamic_enter_mps;
+    const double exit = track.getRepClass() == mc_mot::PEDESTRIAN
+        ? config.output_pedestrian_static_enter_mps : config.output_static_enter_mps;
     // Only call after an actual observation update, never on projected copies.
     track.output_motion_dynamic = stationary_output_policy::UpdateDynamic(
         track.output_motion_dynamic, std::hypot(track.state_vec(S_VX), track.state_vec(S_VY)),
-        enter, config.output_static_enter_mps);
+        enter, exit);
 }
 
 void HoldUnknownCoastingPose(mc_mot::TrackStruct &track,

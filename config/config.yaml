@@ -19,9 +19,6 @@ configure:
   hold_unknown_coasting_pose: false
   # Separate known-class output-only candidate. No timer or internal EKF change.
   hold_stationary_known_output_pose: false
-  output_vehicle_dynamic_enter_mps: 0.5
-  output_pedestrian_dynamic_enter_mps: 0.7
-  output_static_enter_mps: 0.2
   # Stronger, independent candidate: stationary UNKNOWN prior, not just copies.
   stationary_unknown_prediction: false
 

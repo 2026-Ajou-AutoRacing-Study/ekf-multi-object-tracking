@@ -509,6 +509,37 @@ TEST(StationaryKnownOutput, StaticHoldFreshUpdateMovingReleaseAndInternalInvaria
   }
 }
 
+TEST(StationaryKnownOutput, DepartureReleasesAtFirstThresholdObservationWithoutExtraWait) {
+  for (auto label : {mc_mot::CAR, mc_mot::PEDESTRIAN}) {
+    for (double speed : {.8, 2.78}) {
+      auto off=Config(false), on=off;
+      on.hold_stationary_known_output_pose=true;
+      auto reference=std::make_unique<EkfMultiObjectTracking>(off);
+      auto candidate=std::make_unique<EkfMultiObjectTracking>(on);
+      for (int i=0;i<20;++i) {
+        Step(*reference,1.+.1*i,0.,label);
+        Step(*candidate,1.+.1*i,0.,label);
+      }
+      ASSERT_FALSE(Active(candidate->GetTrackResults()).output_motion_dynamic);
+      bool observed_release=false;
+      for (int i=1;i<=30;++i) {
+        Step(*reference,2.9+.1*i,speed*.1*i,label);
+        Step(*candidate,2.9+.1*i,speed*.1*i,label);
+        const auto raw=Active(reference->GetTrackResults());
+        const auto out=Active(candidate->GetTrackResults());
+        const double enter=label==mc_mot::PEDESTRIAN?.7:.5;
+        if (std::hypot(raw.state_vec(S_VX),raw.state_vec(S_VY))>=enter) {
+          EXPECT_TRUE(out.output_motion_dynamic);
+          EXPECT_TRUE((raw.state_vec.array()==out.state_vec.array()).all());
+          observed_release=true;
+          break;
+        }
+      }
+      EXPECT_TRUE(observed_release);
+    }
+  }
+}
+
 TEST(StationaryKnownOutput, UnknownAndBicycleRemainUnchangedWithoutSeparateFlag) {
   for (auto label : {mc_mot::UNKNOWN, mc_mot::BICYCLE}) {
     auto off = Config(false), on = off;

@@ -352,6 +352,7 @@ struct MultiClassObjectTrackingConfig {
     double output_vehicle_dynamic_enter_mps{0.5};
     double output_pedestrian_dynamic_enter_mps{0.7};
     double output_static_enter_mps{0.2};
+    double output_pedestrian_static_enter_mps{0.2};
     // Separate research candidate: use a stationary world-frame transition
     // for UNKNOWN priors as well as output copies only until a known-class
     // measurement has been associated. Fresh position updates remain enabled;

@@ -359,18 +359,25 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
                    config_.hold_unknown_coasting_pose, false);
     nh.param<bool>("configure/hold_stationary_known_output_pose",
                    config_.hold_stationary_known_output_pose, false);
-    nh.param<double>("configure/output_vehicle_dynamic_enter_mps",
-                     config_.output_vehicle_dynamic_enter_mps, 0.5);
-    nh.param<double>("configure/output_pedestrian_dynamic_enter_mps",
-                     config_.output_pedestrian_dynamic_enter_mps, 0.7);
-    nh.param<double>("configure/output_static_enter_mps",
-                     config_.output_static_enter_mps, 0.2);
+    // Read the planner-owned YAML loaded in our private configure namespace.
+    // Do not write or override the planner's actual parameters.
+    if (config_.hold_stationary_known_output_pose) {
+        const std::string prefix = "configure/shared_planning/avoidance_object_ownership/";
+        if (!nh.getParam(prefix + "dynamic_enter_speed", config_.output_vehicle_dynamic_enter_mps) ||
+            !nh.getParam(prefix + "static_enter_speed", config_.output_static_enter_mps) ||
+            !nh.getParam(prefix + "pedestrian_dynamic_enter_speed", config_.output_pedestrian_dynamic_enter_mps) ||
+            !nh.getParam(prefix + "pedestrian_static_enter_speed", config_.output_pedestrian_static_enter_mps)) {
+            throw std::invalid_argument("stationary output requires planner-owned ownership settings");
+        }
+    }
     if (!std::isfinite(config_.output_static_enter_mps) ||
         !std::isfinite(config_.output_vehicle_dynamic_enter_mps) ||
         !std::isfinite(config_.output_pedestrian_dynamic_enter_mps) ||
+        !std::isfinite(config_.output_pedestrian_static_enter_mps) ||
         config_.output_static_enter_mps < 0.0 ||
+        config_.output_pedestrian_static_enter_mps < 0.0 ||
         config_.output_static_enter_mps >= config_.output_vehicle_dynamic_enter_mps ||
-        config_.output_static_enter_mps >= config_.output_pedestrian_dynamic_enter_mps) {
+        config_.output_pedestrian_static_enter_mps >= config_.output_pedestrian_dynamic_enter_mps) {
         throw std::invalid_argument("invalid stationary output hysteresis thresholds");
     }
     nh.param<bool>("configure/stationary_unknown_prediction",
