@@ -12,15 +12,36 @@
 /****************************************************************************/
 
 #include "algorithm/ekf_multi_object_tracking.hpp"
+#include "stationary_output_policy.hpp"
 
 constexpr std::size_t mc_mot::AssociationDiagnostics::kMaximumRows;
 
 namespace {
+bool SupportedStaticClass(const mc_mot::TrackStruct &track) {
+    const auto label = track.getRepClass();
+    return label == mc_mot::CAR || label == mc_mot::TRUCK ||
+           label == mc_mot::PEDESTRIAN;
+}
+
+void UpdateOutputMotion(mc_mot::TrackStruct &track,
+                        const MultiClassObjectTrackingConfig &config) {
+    if (!config.hold_stationary_known_output_pose || !SupportedStaticClass(track)) return;
+    const double enter = track.getRepClass() == mc_mot::PEDESTRIAN
+        ? config.output_pedestrian_dynamic_enter_mps : config.output_vehicle_dynamic_enter_mps;
+    // Only call after an actual observation update, never on projected copies.
+    track.output_motion_dynamic = stationary_output_policy::UpdateDynamic(
+        track.output_motion_dynamic, std::hypot(track.state_vec(S_VX), track.state_vec(S_VY)),
+        enter, config.output_static_enter_mps);
+}
+
 void HoldUnknownCoastingPose(mc_mot::TrackStruct &track,
                             const MultiClassObjectTrackingConfig &config) {
-    if (!config.hold_unknown_coasting_pose || !config.global_coord_track ||
-        !track.is_init || track.getRepClass() != mc_mot::UNKNOWN ||
-        track.has_known_class_measurement || !track.has_observed_output_pose) return;
+    const bool unknown = config.hold_unknown_coasting_pose &&
+        track.getRepClass() == mc_mot::UNKNOWN && !track.has_known_class_measurement;
+    const bool stationary_known = config.hold_stationary_known_output_pose &&
+        SupportedStaticClass(track) && !track.output_motion_dynamic;
+    if (!(unknown || stationary_known) || !config.global_coord_track ||
+        !track.is_init || !track.has_observed_output_pose) return;
     track.state_vec(S_X) = track.last_observed_output_pose.x();
     track.state_vec(S_Y) = track.last_observed_output_pose.y();
     track.state_vec(S_YAW) = track.last_observed_output_pose.z();
@@ -793,6 +814,7 @@ void EkfMultiObjectTracking::UpdateTrack(mc_mot::TrackStruct &track, const mc_mo
             track.state_vec(S_YAW_RATE) = 0.0;
         }
     }
+    UpdateOutputMotion(track, config_);
 }
 
 void EkfMultiObjectTracking::FuseVelocity(
@@ -1027,6 +1049,7 @@ void EkfMultiObjectTracking::InitTrack(mc_mot::TrackStruct &track, const mc_mot:
     }
 
     track.updateDetectionCount(true);
+    UpdateOutputMotion(track, config_);
 }
 
 void EkfMultiObjectTracking::MatchPairs(const Eigen::MatrixXd &cost_matrix, std::vector<int> &row_indices,

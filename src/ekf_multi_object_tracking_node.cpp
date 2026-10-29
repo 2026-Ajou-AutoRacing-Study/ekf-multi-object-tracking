@@ -357,6 +357,22 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
                    config_.hold_unknown_output_pose, false);
     nh.param<bool>("configure/hold_unknown_coasting_pose",
                    config_.hold_unknown_coasting_pose, false);
+    nh.param<bool>("configure/hold_stationary_known_output_pose",
+                   config_.hold_stationary_known_output_pose, false);
+    nh.param<double>("configure/output_vehicle_dynamic_enter_mps",
+                     config_.output_vehicle_dynamic_enter_mps, 0.5);
+    nh.param<double>("configure/output_pedestrian_dynamic_enter_mps",
+                     config_.output_pedestrian_dynamic_enter_mps, 0.7);
+    nh.param<double>("configure/output_static_enter_mps",
+                     config_.output_static_enter_mps, 0.2);
+    if (!std::isfinite(config_.output_static_enter_mps) ||
+        !std::isfinite(config_.output_vehicle_dynamic_enter_mps) ||
+        !std::isfinite(config_.output_pedestrian_dynamic_enter_mps) ||
+        config_.output_static_enter_mps < 0.0 ||
+        config_.output_static_enter_mps >= config_.output_vehicle_dynamic_enter_mps ||
+        config_.output_static_enter_mps >= config_.output_pedestrian_dynamic_enter_mps) {
+        throw std::invalid_argument("invalid stationary output hysteresis thresholds");
+    }
     nh.param<bool>("configure/stationary_unknown_prediction",
                    config_.stationary_unknown_prediction, false);
     nh.param<bool>("configure/fast_confirmed_vehicle_promotion",

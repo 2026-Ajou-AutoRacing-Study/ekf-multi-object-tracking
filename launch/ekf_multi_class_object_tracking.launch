@@ -24,6 +24,10 @@
   <arg name="compensate_output_to_current_time" default="false"/>
   <arg name="hold_unknown_output_pose" default="false"/>
   <arg name="hold_unknown_coasting_pose" default="false"/>
+  <arg name="hold_stationary_known_output_pose" default="false"/>
+  <arg name="output_vehicle_dynamic_enter_mps" default="0.5"/>
+  <arg name="output_pedestrian_dynamic_enter_mps" default="0.7"/>
+  <arg name="output_static_enter_mps" default="0.2"/>
   <arg name="stationary_unknown_prediction" default="false"/>
   <arg name="maximum_output_compensation_sec" default="0.25"/>
   <arg name="fixed_output_rate_hz" default="0.0"/>
@@ -85,6 +89,14 @@
          value="$(arg hold_unknown_output_pose)"/>
   <param name="configure/hold_unknown_coasting_pose"
          value="$(arg hold_unknown_coasting_pose)"/>
+  <param name="configure/hold_stationary_known_output_pose"
+         value="$(arg hold_stationary_known_output_pose)"/>
+  <param name="configure/output_vehicle_dynamic_enter_mps"
+         value="$(arg output_vehicle_dynamic_enter_mps)"/>
+  <param name="configure/output_pedestrian_dynamic_enter_mps"
+         value="$(arg output_pedestrian_dynamic_enter_mps)"/>
+  <param name="configure/output_static_enter_mps"
+         value="$(arg output_static_enter_mps)"/>
   <param name="configure/stationary_unknown_prediction"
          value="$(arg stationary_unknown_prediction)"/>
   <param name="configure/maximum_output_compensation_sec"

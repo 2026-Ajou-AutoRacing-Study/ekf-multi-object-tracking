@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "algorithm/ekf_multi_object_tracking.hpp"
+#include "stationary_output_policy.hpp"
 
 namespace {
 MultiClassObjectTrackingConfig Config(bool hold) {
@@ -449,6 +450,77 @@ TEST(UnknownCoastingOutput, PredictedCopyPreservesCovarianceAndFreshMeasurementT
   EXPECT_DOUBLE_EQ(held.state_vec(S_X), last.state_vec(S_X));
   EXPECT_DOUBLE_EQ(held.state_vec(S_YAW), last.state_vec(S_YAW));
   EXPECT_DOUBLE_EQ(held.last_measurement_time, plain.last_measurement_time);
+}
+
+TEST(StationaryKnownOutput, BoundariesHysteresisAndInvalidSpeed) {
+  using stationary_output_policy::UpdateDynamic;
+  for (double enter : {.5, .7}) {
+    EXPECT_FALSE(UpdateDynamic(false, .3, enter, .2));
+    EXPECT_TRUE(UpdateDynamic(true, .3, enter, .2));
+    EXPECT_TRUE(UpdateDynamic(false, enter, enter, .2));
+    EXPECT_FALSE(UpdateDynamic(true, .2, enter, .2));
+    EXPECT_TRUE(UpdateDynamic(false, NAN, enter, .2));
+    EXPECT_TRUE(UpdateDynamic(false, INFINITY, enter, .2));
+  }
+}
+
+TEST(StationaryKnownOutput, DefaultsAndSlotReset) {
+  EXPECT_FALSE(MultiClassObjectTrackingConfig{}.hold_stationary_known_output_pose);
+  mc_mot::TrackStruct track;
+  track.output_motion_dynamic = true;
+  track.reset();
+  EXPECT_FALSE(track.output_motion_dynamic);
+}
+
+TEST(StationaryKnownOutput, StaticHoldFreshUpdateMovingReleaseAndInternalInvariant) {
+  for (auto label : {mc_mot::CAR, mc_mot::TRUCK, mc_mot::PEDESTRIAN}) {
+    auto off = Config(false), on = off;
+    on.hold_stationary_known_output_pose = true;
+    auto reference = std::make_unique<EkfMultiObjectTracking>(off);
+    auto candidate = std::make_unique<EkfMultiObjectTracking>(on);
+    // Small consistent drift, below dynamic entry, leaves a nonzero EKF velocity.
+    for (int i = 0; i < 30; ++i) {
+      for (auto *t : {reference.get(), candidate.get()})
+        Step(*t, 1. + i * .1, i * .03, label);
+    }
+    const auto anchor = Active(candidate->GetTrackResults());
+    ASSERT_FALSE(anchor.output_motion_dynamic);
+    ASSERT_GT(std::hypot(anchor.state_vec(S_VX), anchor.state_vec(S_VY)), .01);
+    for (auto *t : {reference.get(), candidate.get()}) t->RunPrediction(.15);
+    const auto plain = Active(reference->GetPredictedTrackResults(4.1));
+    const auto held = Active(candidate->GetPredictedTrackResults(4.1));
+    EXPECT_DOUBLE_EQ(held.state_vec(S_X), anchor.state_vec(S_X));
+    EXPECT_GT(std::abs(plain.state_vec(S_X) - held.state_vec(S_X)), .001);
+    EXPECT_TRUE((plain.state_cov.array() == held.state_cov.array()).all());
+    candidate->UpdateConfig(off);
+    SameInternalState(*reference, *candidate);
+    candidate->UpdateConfig(on);
+    // An actual update changes the anchor immediately, not after a timer.
+    for (auto *t : {reference.get(), candidate.get()}) Step(*t, 4.2, 1.0, label);
+    EXPECT_NE(Active(candidate->GetTrackResults()).state_vec(S_X), anchor.state_vec(S_X));
+    for (int i = 0; i < 25; ++i) {
+      for (auto *t : {reference.get(), candidate.get()})
+        Step(*t, 4.3 + .1 * i, 1.1 + .1 * i, label);
+    }
+    ASSERT_TRUE(Active(candidate->GetTrackResults()).output_motion_dynamic);
+    reference->RunPrediction(.1);
+    candidate->RunPrediction(.1);
+    SameInternalState(*reference, *candidate);
+  }
+}
+
+TEST(StationaryKnownOutput, UnknownAndBicycleRemainUnchangedWithoutSeparateFlag) {
+  for (auto label : {mc_mot::UNKNOWN, mc_mot::BICYCLE}) {
+    auto off = Config(false), on = off;
+    on.hold_stationary_known_output_pose = true;
+    auto reference = std::make_unique<EkfMultiObjectTracking>(off);
+    auto candidate = std::make_unique<EkfMultiObjectTracking>(on);
+    Train(*reference, label);
+    Train(*candidate, label);
+    reference->RunPrediction(.2);
+    candidate->RunPrediction(.2);
+    SameInternalState(*reference, *candidate);
+  }
 }
 
 int main(int argc, char** argv) {
