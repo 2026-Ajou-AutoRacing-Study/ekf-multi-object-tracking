@@ -14,6 +14,9 @@ configure:
   # Candidate only: preserve UNKNOWN measurement pose in predicted output
   # copies; does not freeze actual new measurements or modify the EKF state.
   hold_unknown_output_pose: false
+  # Candidate: retain last associated filtered pose in UNKNOWN output copies.
+  # Internal association/filter, covariance, track count and expiry are unchanged.
+  hold_unknown_coasting_pose: false
   # Stronger, independent candidate: stationary UNKNOWN prior, not just copies.
   stationary_unknown_prediction: false
 

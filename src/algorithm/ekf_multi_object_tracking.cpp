@@ -16,6 +16,16 @@
 constexpr std::size_t mc_mot::AssociationDiagnostics::kMaximumRows;
 
 namespace {
+void HoldUnknownCoastingPose(mc_mot::TrackStruct &track,
+                            const MultiClassObjectTrackingConfig &config) {
+    if (!config.hold_unknown_coasting_pose || !config.global_coord_track ||
+        !track.is_init || track.getRepClass() != mc_mot::UNKNOWN ||
+        track.has_known_class_measurement || !track.has_observed_output_pose) return;
+    track.state_vec(S_X) = track.last_observed_output_pose.x();
+    track.state_vec(S_Y) = track.last_observed_output_pose.y();
+    track.state_vec(S_YAW) = track.last_observed_output_pose.z();
+}
+
 double DimensionRatio(const mc_mot::ObjectDimension& a,
                       const mc_mot::ObjectDimension& b) {
     if (!std::isfinite(a.length) || !std::isfinite(a.width) ||
@@ -434,6 +444,7 @@ mc_mot::TrackStructs EkfMultiObjectTracking::GetTrackResults() const{
         //     o_track.state_vec(S_AX) = 0.0;
         //     o_track.state_vec(S_AY) = 0.0;
         // }
+        HoldUnknownCoastingPose(o_track, config_);
         o_track_results.track.push_back(o_track);
     }
 
@@ -442,9 +453,16 @@ mc_mot::TrackStructs EkfMultiObjectTracking::GetTrackResults() const{
 
 mc_mot::TrackStructs EkfMultiObjectTracking::GetPredictedTrackResults(
         const double target_timestamp) {
-    mc_mot::TrackStructs results = GetTrackResults();
+    // Project raw copied state before applying output-only pose policies.
+    // Starting from an already-held yaw could change predicted covariance.
+    mc_mot::TrackStructs results;
+    results.time_stamp = recent_timestamp_;
+    for (const auto &track : all_tracks_) results.track.push_back(track);
     const double dt = target_timestamp - results.time_stamp;
-    if (dt <= 0.0) return results;
+    if (dt <= 0.0) {
+        for (auto &track : results.track) HoldUnknownCoastingPose(track, config_);
+        return results;
+    }
     for (auto& track : results.track) {
         if (!track.is_init) continue;
         const bool hold_pose = config_.hold_unknown_output_pose &&
@@ -461,6 +479,7 @@ mc_mot::TrackStructs EkfMultiObjectTracking::GetPredictedTrackResults(
             track.state_vec(S_Y) = measured_y;
             track.state_vec(S_YAW) = measured_yaw;
         }
+        HoldUnknownCoastingPose(track, config_);
     }
     results.time_stamp = target_timestamp;
     return results;
@@ -708,6 +727,8 @@ void EkfMultiObjectTracking::UpdateTrack(mc_mot::TrackStruct &track, const mc_mo
     track.updateDetectionCount(true);
     track.update_time = measurement.state.time_stamp;
     track.last_measurement_time = measurement.state.time_stamp;
+    track.last_observed_output_pose = track.state_vec.head<3>();
+    track.has_observed_output_pose = true;
     track.detection_confidence = config_.dimension_filter_alpha * measurement.detection_confidence +
                                  (1.0 - config_.dimension_filter_alpha) * track.detection_confidence;
     track.age++;
@@ -953,6 +974,8 @@ void EkfMultiObjectTracking::InitTrack(mc_mot::TrackStruct &track, const mc_mot:
     track.state_vec(S_X) = measurement.state.x;
     track.state_vec(S_Y) = measurement.state.y;
     track.state_vec(S_YAW) = measurement.state.yaw;
+    track.last_observed_output_pose = track.state_vec.head<3>();
+    track.has_observed_output_pose = true;
     if (measurement.has_velocity &&
         config_.detection_velocity_fusion_mode >= 1 &&
         config_.detection_velocity_fusion_mode <= 3) {

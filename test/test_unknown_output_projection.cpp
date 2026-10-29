@@ -365,6 +365,92 @@ TEST(StationaryUnknownPrediction, KnownVehiclesAndPedestriansRemainExactlyUnchan
   }
 }
 
+TEST(UnknownCoastingOutput, DefaultOffAndStaticHistoryReset) {
+  EXPECT_FALSE(MultiClassObjectTrackingConfig{}.hold_unknown_coasting_pose);
+  mc_mot::TrackStruct track;
+  track.has_observed_output_pose = true;
+  track.last_observed_output_pose << 1., 2., 3.;
+  track.reset();
+  EXPECT_FALSE(track.has_observed_output_pose);
+  EXPECT_EQ(track.last_observed_output_pose.norm(), 0.);
+}
+
+TEST(UnknownCoastingOutput, DropsNoTracksAndHoldsOnlyOutputUntilNextAssociation) {
+  auto base_config = Config(false), hold_config = Config(false);
+  hold_config.hold_unknown_coasting_pose = true;
+  auto reference = std::make_unique<EkfMultiObjectTracking>(base_config);
+  auto candidate = std::make_unique<EkfMultiObjectTracking>(hold_config);
+  Train(*reference);
+  Train(*candidate);
+  const auto initial = Active(candidate->GetTrackResults());
+  for (int i = 1; i <= 3; ++i) {
+    reference->RunPrediction(.1);
+    candidate->RunPrediction(.1);
+    mc_mot::Meastructs empty;
+    empty.time_stamp = initial.last_measurement_time + i * .1;
+    reference->RunUpdate(empty);
+    candidate->RunUpdate(empty);
+    const auto raw = Active(reference->GetTrackResults());
+    const auto held = Active(candidate->GetTrackResults());
+    EXPECT_GT(raw.state_vec(S_X), initial.state_vec(S_X));
+    EXPECT_DOUBLE_EQ(held.state_vec(S_X), initial.state_vec(S_X));
+    EXPECT_DOUBLE_EQ(held.last_measurement_time, raw.last_measurement_time);
+    EXPECT_EQ(held.track_id, raw.track_id);
+    EXPECT_EQ(held.is_confirmed, raw.is_confirmed);
+    EXPECT_TRUE((held.state_cov.array() == raw.state_cov.array()).all());
+    // Disable output-only projection to compare the untouched internal filters.
+    candidate->UpdateConfig(base_config);
+    SameInternalState(*reference, *candidate);
+    candidate->UpdateConfig(hold_config);
+  }
+  Step(*reference, 4.3, 7.0);
+  Step(*candidate, 4.3, 7.0);
+  EXPECT_GT(Active(candidate->GetTrackResults()).state_vec(S_X), initial.state_vec(S_X));
+  candidate->UpdateConfig(base_config);
+  SameInternalState(*reference, *candidate);
+}
+
+TEST(UnknownCoastingOutput, KnownVehicleAndPedestrianOutputsStayIdentical) {
+  for (auto label : {mc_mot::CAR, mc_mot::TRUCK, mc_mot::PEDESTRIAN}) {
+    auto base_config = Config(false), hold_config = Config(false);
+    hold_config.hold_unknown_coasting_pose = true;
+    auto reference = std::make_unique<EkfMultiObjectTracking>(base_config);
+    auto candidate = std::make_unique<EkfMultiObjectTracking>(hold_config);
+    Train(*reference, label);
+    Train(*candidate, label);
+    reference->RunPrediction(.2);
+    candidate->RunPrediction(.2);
+    SameInternalState(*reference, *candidate);
+  }
+}
+
+TEST(UnknownCoastingOutput, PredictedCopyPreservesCovarianceAndFreshMeasurementTime) {
+  auto base_config = Config(false), hold_config = Config(false);
+  hold_config.hold_unknown_coasting_pose = true;
+  auto reference = std::make_unique<EkfMultiObjectTracking>(base_config);
+  auto candidate = std::make_unique<EkfMultiObjectTracking>(hold_config);
+  for (int i = 0; i < 30; ++i) {
+    const double stamp = 1. + i * .1;
+    for (auto *tracker : {reference.get(), candidate.get()}) {
+      if (i) tracker->RunPrediction(.1);
+      mc_mot::Meastructs frame;
+      frame.time_stamp = stamp;
+      auto measurement = Measurement(stamp, i * .2, mc_mot::UNKNOWN);
+      measurement.state.yaw = i * .02;
+      frame.meas = {measurement};
+      tracker->RunUpdate(frame);
+    }
+  }
+  const auto last = Active(candidate->GetTrackResults());
+  for (auto *tracker : {reference.get(), candidate.get()}) tracker->RunPrediction(.3);
+  const auto plain = Active(reference->GetPredictedTrackResults(4.4));
+  const auto held = Active(candidate->GetPredictedTrackResults(4.4));
+  EXPECT_TRUE((held.state_cov.array() == plain.state_cov.array()).all());
+  EXPECT_DOUBLE_EQ(held.state_vec(S_X), last.state_vec(S_X));
+  EXPECT_DOUBLE_EQ(held.state_vec(S_YAW), last.state_vec(S_YAW));
+  EXPECT_DOUBLE_EQ(held.last_measurement_time, plain.last_measurement_time);
+}
+
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

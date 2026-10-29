@@ -355,6 +355,8 @@ void EkfMultiObjectTrackingNode::ProcessYAML() {
     nh.getParam("configure/output_confirmed_track", config_.output_confirmed_track);
     nh.param<bool>("configure/hold_unknown_output_pose",
                    config_.hold_unknown_output_pose, false);
+    nh.param<bool>("configure/hold_unknown_coasting_pose",
+                   config_.hold_unknown_coasting_pose, false);
     nh.param<bool>("configure/stationary_unknown_prediction",
                    config_.stationary_unknown_prediction, false);
     nh.param<bool>("configure/fast_confirmed_vehicle_promotion",

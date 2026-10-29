@@ -128,6 +128,8 @@ struct TrackStruct {
     double initialization_time{0.0};
     double update_time{0.0};
     double last_measurement_time{0.0};
+    Eigen::Vector3d last_observed_output_pose{Eigen::Vector3d::Zero()};
+    bool has_observed_output_pose{false};
     bool has_detector_velocity{false};
     double detector_velocity_x{0.0};
     double detector_velocity_y{0.0};
@@ -239,6 +241,8 @@ struct TrackStruct {
         initialization_time = 0.0;
         update_time = 0.0;
         last_measurement_time = 0.0;
+        last_observed_output_pose.setZero();
+        has_observed_output_pose = false;
         has_detector_velocity = false;
         detector_velocity_x = 0.0;
         detector_velocity_y = 0.0;
@@ -340,6 +344,7 @@ struct MultiClassObjectTrackingConfig {
     // downstream motion policy reports zero twist. Internal EKF/associations
     // and fresh measurement-time poses remain unchanged.
     bool hold_unknown_output_pose{false};
+    bool hold_unknown_coasting_pose{false};
     // Separate research candidate: use a stationary world-frame transition
     // for UNKNOWN priors as well as output copies only until a known-class
     // measurement has been associated. Fresh position updates remain enabled;
